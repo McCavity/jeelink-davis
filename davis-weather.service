@@ -1,0 +1,20 @@
+[Unit]
+Description=Davis Vantage Pro 2 Weather Station Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=davis
+Group=davis
+WorkingDirectory=/opt/jeelink-davis
+Environment=PYTHONUNBUFFERED=1
+# Uncomment to override serial port auto-detection:
+# Environment=DAVIS_PORT=/dev/ttyUSB0
+ExecStart=/opt/jeelink-davis/.venv/bin/uvicorn web.app:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
