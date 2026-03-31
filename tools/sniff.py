@@ -5,8 +5,12 @@ sniff.py – Raw JeeLink listener.
 Opens the JeeLink serial port, sends the Davis firmware init command,
 and prints everything received for the specified duration.
 
+If --port is omitted, the JeeLink is auto-detected by USB VID/PID.
+
 Usage:
-    python tools/sniff.py [--port /dev/cu.usbserial-AI05CBYZ] [--baud 57600] [--duration 60]
+    python tools/sniff.py
+    python tools/sniff.py --port /dev/ttyUSB0
+    python tools/sniff.py --baud 57600 --duration 120
 """
 
 import argparse
@@ -15,15 +19,30 @@ import time
 
 import serial
 
-DEFAULT_PORT = "/dev/cu.usbserial-AI05CBYZ"
+from jeelink_davis.detect import find_jeelink_port
+
 DEFAULT_BAUD = 57600
 INIT_COMMAND = b"0,0s r\n"
+
+
+def resolve_port(port_arg: str | None) -> str:
+    """Return the port to use, auto-detecting if not specified."""
+    if port_arg:
+        return port_arg
+    print("No port specified — auto-detecting JeeLink …")
+    try:
+        port = find_jeelink_port()
+        print(f"Found JeeLink at {port}")
+        return port
+    except RuntimeError as e:
+        print(f"Auto-detect failed: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def sniff(port: str, baud: int, duration: int) -> None:
     print(f"Opening {port} at {baud} baud …")
     try:
-        ser = serial.Serial(port, baud, timeout=1)
+        ser = serial.Serial(port, baud, timeout=1, rtscts=False, dsrdtr=False)
     except serial.SerialException as e:
         print(f"ERROR: Could not open port: {e}", file=sys.stderr)
         sys.exit(1)
@@ -40,7 +59,6 @@ def sniff(port: str, baud: int, duration: int) -> None:
             if line:
                 ts = time.strftime("%H:%M:%S")
                 print(f"[{ts}] {line!r}")
-                # Also print decoded if it looks like ASCII
                 try:
                     decoded = line.decode("ascii").rstrip()
                     print(f"          {decoded}")
@@ -55,12 +73,17 @@ def sniff(port: str, baud: int, duration: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Raw JeeLink Davis sniffer")
-    parser.add_argument("--port", default=DEFAULT_PORT, help="Serial port")
+    parser.add_argument(
+        "--port",
+        default=None,
+        help="Serial port (default: auto-detect by USB VID/PID)",
+    )
     parser.add_argument("--baud", type=int, default=DEFAULT_BAUD, help="Baud rate")
     parser.add_argument("--duration", type=int, default=60, help="Listen duration in seconds")
     args = parser.parse_args()
 
-    sniff(args.port, args.baud, args.duration)
+    port = resolve_port(args.port)
+    sniff(port, args.baud, args.duration)
 
 
 if __name__ == "__main__":
