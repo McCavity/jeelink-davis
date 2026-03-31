@@ -22,3 +22,8 @@ htmlcov/
 
 # Claude Code local settings (machine-specific)
 .claude/settings.local.json
+
+# Database (generated at runtime)
+data/*.db
+data/*.db-wal
+data/*.db-shm

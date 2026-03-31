@@ -17,8 +17,10 @@
     "signal":         "Signal",
     "gust":           "Böe",
     "rain_tips_unit": "Kippsv.",
-    "rain_mm_label":  "Letzte Kipp.",
-    "rain_ago":       "s her"
+    "rain_mm_label":    "Letzte Kipp.",
+    "rain_ago":         "s her",
+    "rain_today":       "Heute",
+    "gust_max_today":   "Max heute"
   },
   "solar": {
     "moon":    "Mond",

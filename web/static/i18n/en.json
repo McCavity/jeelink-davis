@@ -17,8 +17,10 @@
     "signal":         "Signal",
     "gust":           "Gust",
     "rain_tips_unit": "tips",
-    "rain_mm_label":  "Last tip",
-    "rain_ago":       "s ago"
+    "rain_mm_label":    "Last tip",
+    "rain_ago":         "s ago",
+    "rain_today":       "Today",
+    "gust_max_today":   "Max today"
   },
   "solar": {
     "moon":    "Moon",

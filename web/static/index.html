@@ -136,6 +136,10 @@
       <div data-i18n="cards.temperature" class="card-label">Temperature</div>
       <div id="temp-val" class="value-large text-amber-400">—</div>
       <div class="text-slate-500 text-sm mt-1">°C</div>
+      <div class="mt-3 flex items-center gap-3 text-xs mono">
+        <span class="text-rose-400">↑ <span id="temp-max-today">—</span></span>
+        <span class="text-sky-400">↓ <span id="temp-min-today">—</span></span>
+      </div>
     </div>
 
     <!-- Wind Speed -->
@@ -145,6 +149,9 @@
       <div class="text-slate-500 text-sm mt-1">m/s</div>
       <div class="mt-3 text-xs text-slate-500">
         <span data-i18n="cards.gust">Gust</span>: <span id="wind-gust-val" class="mono text-slate-300">—</span> m/s
+      </div>
+      <div class="mt-1 text-xs text-slate-500">
+        <span data-i18n="cards.gust_max_today">Max today</span>: <span id="wind-gust-max-today" class="mono text-slate-300">—</span> m/s
       </div>
     </div>
 
@@ -170,6 +177,10 @@
       <div class="bar-track mt-3">
         <div id="humidity-bar" class="bar-fill bg-teal-500" style="width:0%"></div>
       </div>
+      <div class="mt-2 flex items-center gap-3 text-xs mono">
+        <span class="text-rose-400">↑ <span id="humidity-max-today">—</span></span>
+        <span class="text-sky-400">↓ <span id="humidity-min-today">—</span></span>
+      </div>
     </div>
 
     <!-- Rain -->
@@ -184,6 +195,9 @@
       </div>
       <div class="text-xs text-slate-500 mt-1">
         <span data-i18n="cards.rain_mm_label">Last tip</span>: <span id="rain-secs-val" class="mono text-slate-300">—</span>
+      </div>
+      <div class="text-xs text-slate-500 mt-1">
+        <span data-i18n="cards.rain_today">Today</span>: <span id="rain-today-val" class="mono text-blue-300">—</span> mm
       </div>
     </div>
 
@@ -647,6 +661,40 @@ async function loadForecast() {
   renderForecast(lastForecastData);
 }
 
+// ── History: pre-seed charts ───────────────────────────────────────────────
+async function loadRecentHistory() {
+  try {
+    const res = await fetch('/api/history/recent?n=50');
+    if (!res.ok) return;
+    const readings = await res.json();
+    for (const r of readings) {
+      chartLabels.push(timeOf(r.timestamp));
+      tempData.push(r.temperature ?? null);
+      windData.push(r.wind_speed  ?? null);
+      gustData.push(r.wind_gust   ?? null);
+    }
+    if (readings.length) {
+      tempChart.update('none');
+      windChart.update('none');
+    }
+  } catch (_) {}
+}
+
+// ── History: today's min/max for card display ──────────────────────────────
+async function loadTodayStats() {
+  try {
+    const res = await fetch('/api/history/today');
+    if (!res.ok) return;
+    const s = await res.json();
+    if (s.temp_min    != null) setText('temp-min-today',       fmt(s.temp_min));
+    if (s.temp_max    != null) setText('temp-max-today',       fmt(s.temp_max));
+    if (s.humidity_min != null) setText('humidity-min-today',  fmt(s.humidity_min, 0));
+    if (s.humidity_max != null) setText('humidity-max-today',  fmt(s.humidity_max, 0));
+    if (s.wind_gust_max != null) setText('wind-gust-max-today', fmt(s.wind_gust_max));
+    if (s.rain_mm     != null) setText('rain-today-val',       fmt(s.rain_mm, 1));
+  } catch (_) {}
+}
+
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 async function loadLatest() {
   try {
@@ -666,19 +714,24 @@ function connectSSE() {
   const lang = localStorage.getItem('lang') || 'en';
   await setLang(lang);
   initCharts();
+  await loadRecentHistory();   // seed charts before SSE starts
   loadLatest();
+  loadTodayStats();
   loadSolar();
   loadForecast();
   connectSSE();
 })();
 
-// Refresh solar at midnight, forecast every 30 min
+// Refresh solar at midnight, forecast every 30 min, today stats every 60 s
 const now = new Date();
 setTimeout(() => {
   loadSolar();
-  setInterval(loadSolar, 86_400_000);
+  loadTodayStats();
+  setInterval(loadSolar,      86_400_000);
+  setInterval(loadTodayStats, 60_000);
 }, new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) - now);
-setInterval(loadForecast, 30 * 60 * 1000);
+setInterval(loadForecast,   30 * 60 * 1000);
+setInterval(loadTodayStats, 60 * 1000);
 </script>
 </body>
 </html>

@@ -11,6 +11,7 @@ from datetime import datetime
 
 from jeelink_davis import DavisStation
 
+from . import db as weather_db
 from .broadcaster import broadcaster
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,10 @@ def station_reader_thread(loop: asyncio.AbstractEventLoop, port: str | None) -> 
         with DavisStation(port=port) as station:
             for reading in station.readings():
                 payload = _reading_to_dict(reading)
+                try:
+                    weather_db.insert_reading(payload)
+                except Exception:
+                    logger.exception("DB insert failed — reading not persisted")
                 asyncio.run_coroutine_threadsafe(broadcaster.broadcast(payload), loop)
     except Exception:
         logger.exception("Davis reader thread crashed")

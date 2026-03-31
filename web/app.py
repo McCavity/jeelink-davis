@@ -40,6 +40,15 @@ _forecast_cache: dict = {"data": None, "expires": 0.0}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialise database before the reader thread starts
+    from . import db as weather_db
+    cfg = load_config()
+    raw_path = cfg.get("storage", {}).get("db_path", "data/readings.db")
+    db_path = Path(raw_path)
+    if not db_path.is_absolute():
+        db_path = Path(__file__).parent.parent / db_path
+    weather_db.init_db(db_path)
+
     loop = asyncio.get_running_loop()
     port = os.environ.get("DAVIS_PORT")
     t = threading.Thread(
@@ -132,6 +141,46 @@ async def solar():
         "moon_phase":  round(mp, 2),
         "moon_name":   _phase_name(mp),
     }
+
+
+@app.get("/api/history/recent")
+async def history_recent(n: int = 50):
+    """Last n readings in chronological order, for chart pre-seeding."""
+    from . import db as weather_db
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: weather_db.query_recent(n))
+
+
+@app.get("/api/history/today")
+async def history_today():
+    """Today's min/max stats for card display."""
+    from . import db as weather_db
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, weather_db.query_today_minmax)
+    if not result:
+        return Response(status_code=204)
+    return result
+
+
+@app.get("/api/stats/daily")
+async def stats_daily():
+    from . import db as weather_db
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: weather_db.query_stats("daily"))
+
+
+@app.get("/api/stats/monthly")
+async def stats_monthly():
+    from . import db as weather_db
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: weather_db.query_stats("monthly"))
+
+
+@app.get("/api/stats/yearly")
+async def stats_yearly():
+    from . import db as weather_db
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: weather_db.query_stats("yearly"))
 
 
 @app.get("/api/forecast")

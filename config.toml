@@ -4,3 +4,6 @@ latitude  = 50.174533   # decimal degrees, positive = North
 longitude = 8.719422    # decimal degrees, positive = East
 elevation = 167         # metres above sea level
 timezone  = "Europe/Berlin"
+
+[storage]
+db_path = "data/readings.db"   # relative to project root, or absolute path
