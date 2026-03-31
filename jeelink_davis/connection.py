@@ -19,9 +19,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_BAUD = 57600
 INIT_COMMAND = b"0,0s r\n"
 
-# Time to wait after sending the init command before reading, so the
-# firmware banner and INIT DICTIONARY arrive before we start processing.
-_INIT_SETTLE_SECS = 0.5
+# Time to wait after sending the init command before reading.
+# The firmware needs ~5 s to reinitialise the radio and start receiving
+# ISS packets; 0.5 s was not enough in practice.
+_INIT_SETTLE_SECS = 5
 
 
 class JeeLinkConnection:
