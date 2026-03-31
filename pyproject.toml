@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jeelink-davis"
+version = "0.1.0"
+description = "Python library for receiving Davis Vantage Pro 2 data via JeeLink USB receiver"
+requires-python = ">=3.11"
+dependencies = [
+    "pyserial>=3.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-mock>=3",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["jeelink_davis*"]
