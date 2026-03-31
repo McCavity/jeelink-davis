@@ -1,0 +1,86 @@
+{
+  "ui": {
+    "subtitle":     "Wetterstation Live",
+    "last_update":  "Letzte Aktualisierung",
+    "waiting":      "Warte…",
+    "live":         "Live",
+    "reconnecting": "Verbinde…",
+    "battery_ok":   "OK",
+    "battery_low":  "SCHWACH"
+  },
+  "cards": {
+    "temperature":    "Temperatur",
+    "wind_speed":     "Windgeschw.",
+    "wind_direction": "Windrichtung",
+    "humidity":       "Luftfeuchtigkeit",
+    "rain":           "Regen",
+    "signal":         "Signal",
+    "gust":           "Böe",
+    "rain_tips_unit": "Kippsv.",
+    "rain_mm_label":  "Letzte Kipp.",
+    "rain_ago":       "s her"
+  },
+  "solar": {
+    "moon":    "Mond",
+    "dawn":    "Dämmerung",
+    "sunrise": "Sonnenaufgang",
+    "noon":    "Mittag",
+    "sunset":  "Sonnenuntergang",
+    "dusk":    "Abenddäm."
+  },
+  "moon_phases": {
+    "new":             "Neumond",
+    "waxing_crescent": "Zunehmende Sichel",
+    "first_quarter":   "Erstes Viertel",
+    "waxing_gibbous":  "Zunehmender Mond",
+    "full":            "Vollmond",
+    "waning_gibbous":  "Abnehmender Mond",
+    "last_quarter":    "Letztes Viertel",
+    "waning_crescent": "Abnehmende Sichel"
+  },
+  "charts": {
+    "temp_title":   "Temperatur — letzte 50 Messwerte",
+    "wind_title":   "Wind — letzte 50 Messwerte",
+    "temp_label":   "Temp. (°C)",
+    "speed_label":  "Geschw. (m/s)",
+    "gust_label":   "Böe (m/s)"
+  },
+  "forecast": {
+    "title":       "5-Tage-Vorhersage",
+    "today":       "Heute",
+    "loading":     "Lade Vorhersage…",
+    "unavailable": "Vorhersage nicht verfügbar",
+    "by":          "Vorhersage von",
+    "days":        ["So","Mo","Di","Mi","Do","Fr","Sa"]
+  },
+  "wmo": {
+    "0":  "Klarer Himmel",
+    "1":  "Überwiegend klar",
+    "2":  "Teilweise bewölkt",
+    "3":  "Bedeckt",
+    "45": "Nebel",
+    "48": "Gefrierender Nebel",
+    "51": "Leichter Nieselregen",
+    "53": "Nieselregen",
+    "55": "Starker Nieselregen",
+    "56": "Gefrierender Nieselregen",
+    "57": "Starker gefrierender Nieselregen",
+    "61": "Leichter Regen",
+    "63": "Regen",
+    "65": "Starker Regen",
+    "66": "Gefrierender Regen",
+    "67": "Starker gefrierender Regen",
+    "71": "Leichter Schneefall",
+    "73": "Schneefall",
+    "75": "Starker Schneefall",
+    "77": "Schneekörner",
+    "80": "Leichte Schauer",
+    "81": "Regenschauer",
+    "82": "Starke Schauer",
+    "85": "Schneeschauer",
+    "86": "Starke Schneeschauer",
+    "95": "Gewitter",
+    "96": "Gewitter mit Hagel",
+    "99": "Schweres Gewitter mit Hagel"
+  }
+}

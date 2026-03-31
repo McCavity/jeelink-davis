@@ -1,0 +1,86 @@
+{
+  "ui": {
+    "subtitle":     "Live Weather Station",
+    "last_update":  "Last update",
+    "waiting":      "Waiting…",
+    "live":         "Live",
+    "reconnecting": "Reconnecting…",
+    "battery_ok":   "OK",
+    "battery_low":  "LOW"
+  },
+  "cards": {
+    "temperature":    "Temperature",
+    "wind_speed":     "Wind Speed",
+    "wind_direction": "Wind Direction",
+    "humidity":       "Humidity",
+    "rain":           "Rain",
+    "signal":         "Signal",
+    "gust":           "Gust",
+    "rain_tips_unit": "tips",
+    "rain_mm_label":  "Last tip",
+    "rain_ago":       "s ago"
+  },
+  "solar": {
+    "moon":    "Moon",
+    "dawn":    "Dawn",
+    "sunrise": "Sunrise",
+    "noon":    "Noon",
+    "sunset":  "Sunset",
+    "dusk":    "Dusk"
+  },
+  "moon_phases": {
+    "new":             "New Moon",
+    "waxing_crescent": "Waxing Crescent",
+    "first_quarter":   "First Quarter",
+    "waxing_gibbous":  "Waxing Gibbous",
+    "full":            "Full Moon",
+    "waning_gibbous":  "Waning Gibbous",
+    "last_quarter":    "Last Quarter",
+    "waning_crescent": "Waning Crescent"
+  },
+  "charts": {
+    "temp_title":   "Temperature — last 50 readings",
+    "wind_title":   "Wind — last 50 readings",
+    "temp_label":   "Temp (°C)",
+    "speed_label":  "Speed (m/s)",
+    "gust_label":   "Gust (m/s)"
+  },
+  "forecast": {
+    "title":       "5-day Forecast",
+    "today":       "Today",
+    "loading":     "Loading forecast…",
+    "unavailable": "Forecast unavailable",
+    "by":          "Forecast by",
+    "days":        ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]
+  },
+  "wmo": {
+    "0":  "Clear sky",
+    "1":  "Mainly clear",
+    "2":  "Partly cloudy",
+    "3":  "Overcast",
+    "45": "Fog",
+    "48": "Icy fog",
+    "51": "Light drizzle",
+    "53": "Drizzle",
+    "55": "Heavy drizzle",
+    "56": "Freezing drizzle",
+    "57": "Heavy freezing drizzle",
+    "61": "Light rain",
+    "63": "Rain",
+    "65": "Heavy rain",
+    "66": "Freezing rain",
+    "67": "Heavy freezing rain",
+    "71": "Light snow",
+    "73": "Snow",
+    "75": "Heavy snow",
+    "77": "Snow grains",
+    "80": "Light showers",
+    "81": "Showers",
+    "82": "Heavy showers",
+    "85": "Snow showers",
+    "86": "Heavy snow showers",
+    "95": "Thunderstorm",
+    "96": "Thunderstorm w/ hail",
+    "99": "Thunderstorm w/ heavy hail"
+  }
+}
