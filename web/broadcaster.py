@@ -10,7 +10,7 @@ import asyncio
 class Broadcaster:
     def __init__(self) -> None:
         self._clients: set[asyncio.Queue] = set()
-        self._latest: dict | None = None
+        self._merged: dict = {}   # best-known value for every field seen so far
 
     def add_client(self) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=5)
@@ -21,7 +21,8 @@ class Broadcaster:
         self._clients.discard(q)
 
     async def broadcast(self, payload: dict) -> None:
-        self._latest = payload
+        # Merge non-null values so _merged always has the freshest value per field
+        self._merged.update({k: v for k, v in payload.items() if v is not None})
         for q in list(self._clients):
             try:
                 q.put_nowait(payload)
@@ -35,7 +36,7 @@ class Broadcaster:
 
     @property
     def latest(self) -> dict | None:
-        return self._latest
+        return self._merged or None
 
 
 broadcaster = Broadcaster()
