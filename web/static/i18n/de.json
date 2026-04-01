@@ -16,10 +16,10 @@
     "rain":           "Regen",
     "signal":         "Signal",
     "gust":           "Böe",
-    "rain_tips_unit": "Kippsv.",
-    "rain_mm_label":    "Letzte Kipp.",
+    "rain_today_label": "heute",
+    "rain_rate_label":  "Rate",
+    "rain_last_tip":    "Letzte Kipp.",
     "rain_ago":         "s her",
-    "rain_today":       "Heute",
     "gust_max_today":   "Max heute"
   },
   "solar": {

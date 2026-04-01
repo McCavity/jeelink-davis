@@ -185,19 +185,22 @@
 
     <!-- Rain -->
     <div class="card">
-      <div data-i18n="cards.rain" class="card-label">Rain</div>
+      <div class="flex items-center justify-between" style="margin-bottom:0.75rem">
+        <div data-i18n="cards.rain" class="card-label" style="margin-bottom:0">Rain</div>
+        <svg id="rain-drop-icon" width="18" height="22" viewBox="0 0 20 26" fill="currentColor" class="text-slate-600" aria-hidden="true">
+          <path d="M10 1 C10 1 1 13 1 18 a9 9 0 0 0 18 0 C19 13 10 1 10 1Z"/>
+        </svg>
+      </div>
       <div class="flex items-baseline gap-1">
-        <span id="rain-tips-val" class="value-medium text-blue-400">—</span>
-        <span data-i18n="cards.rain_tips_unit" class="text-slate-500 text-sm">tips</span>
+        <span id="rain-today-val" class="value-medium text-blue-400">—</span>
+        <span class="text-slate-500 text-sm">mm</span>
+        <span data-i18n="cards.rain_today_label" class="text-slate-600 text-xs ml-1">today</span>
       </div>
       <div class="text-xs text-slate-500 mt-2">
-        = <span id="rain-mm-val" class="mono text-slate-300">—</span> mm
+        <span data-i18n="cards.rain_rate_label">Rate</span>: <span id="rain-rate-val" class="mono text-slate-300">—</span> mm/h
       </div>
       <div class="text-xs text-slate-500 mt-1">
-        <span data-i18n="cards.rain_mm_label">Last tip</span>: <span id="rain-secs-val" class="mono text-slate-300">—</span>
-      </div>
-      <div class="text-xs text-slate-500 mt-1">
-        <span data-i18n="cards.rain_today">Today</span>: <span id="rain-today-val" class="mono text-blue-300">—</span> mm
+        <span data-i18n="cards.rain_last_tip">Last tip</span>: <span id="rain-secs-val" class="mono text-slate-300">—</span>
       </div>
     </div>
 
@@ -347,6 +350,28 @@ async function setLang(lang) {
   // Re-apply dynamic UI state that contains translated strings
   renderDynamicLabels();
 }
+
+// ── Rain rate & elapsed tracking ───────────────────────────────────────────
+let lastTipWallTime = null;  // Date.now() when the last bucket tip was received
+let lastRainSecs    = null;  // inter-tip interval (s) at that moment
+const RAIN_ACTIVE_SECS = 1800; // 30 min decay — after this, rate resets to 0
+
+function tickRain() {
+  if (lastTipWallTime === null) return;
+  const elapsed = Math.floor((Date.now() - lastTipWallTime) / 1000);
+  const active  = elapsed < RAIN_ACTIVE_SECS;
+  const rate    = (active && lastRainSecs > 0) ? 720 / lastRainSecs : 0;
+
+  setText('rain-secs-val', elapsed + ' ' + tr('cards.rain_ago', 's ago'));
+  setText('rain-rate-val', fmt(rate, 1));
+
+  const icon = document.getElementById('rain-drop-icon');
+  if (icon) {
+    icon.classList.toggle('text-blue-400', active);
+    icon.classList.toggle('text-slate-600', !active);
+  }
+}
+setInterval(tickRain, 1000);
 
 // ── Persistent merged state ────────────────────────────────────────────────
 const state = {};
@@ -507,15 +532,10 @@ function renderState() {
     document.getElementById('humidity-bar').style.width = Math.min(100, s.humidity) + '%';
   }
 
-  // Rain
-  if (s.rain_tip_count != null) {
-    setText('rain-tips-val', fmt(s.rain_tip_count, 0));
-    setText('rain-mm-val',   fmt(s.rain_tip_count * 0.2, 1));
-  }
-  if (s.rain_secs != null) {
-    setText('rain-secs-val', s.rain_secs >= 0
-      ? s.rain_secs + ' ' + tr('cards.rain_ago', 's ago')
-      : '—');
+  // Rain — tip time tracking; rate & elapsed display handled by tickRain()
+  if (s.rain_secs != null && s.rain_secs >= 0) {
+    lastTipWallTime = Date.now();
+    lastRainSecs    = s.rain_secs;
   }
 }
 
@@ -525,11 +545,7 @@ function renderDynamicLabels() {
   if (state.battery_ok !== undefined) {
     setText('battery-val', state.battery_ok ? tr('ui.battery_ok','OK') : tr('ui.battery_low','LOW'));
   }
-  if (state.rain_secs != null) {
-    setText('rain-secs-val', state.rain_secs >= 0
-      ? state.rain_secs + ' ' + tr('cards.rain_ago', 's ago')
-      : '—');
-  }
+  tickRain();
   // Live label — only update if currently showing a translated string
   const lbl = document.getElementById('live-label');
   if (lbl && lbl.dataset.state) {
