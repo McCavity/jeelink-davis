@@ -79,10 +79,11 @@ class JeeLinkConnection:
             rtscts=False,
             dsrdtr=False,
         )
+        logger.debug(f"Delaying for {_INIT_SETTLE_SECS} seconds...")
+        time.sleep(_INIT_SETTLE_SECS)
         logger.debug("Sending init command")
         self._serial.write(INIT_COMMAND)
         self._serial.flush()
-        time.sleep(_INIT_SETTLE_SECS)
 
     def close(self) -> None:
         """Close the serial port if open."""

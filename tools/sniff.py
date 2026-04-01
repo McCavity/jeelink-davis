@@ -23,6 +23,7 @@ from jeelink_davis.detect import find_jeelink_port
 
 DEFAULT_BAUD = 57600
 INIT_COMMAND = b"0,0s r\n"
+_INIT_SETTLE_SECS = 5
 
 
 def resolve_port(port_arg: str | None) -> str:
@@ -47,6 +48,8 @@ def sniff(port: str, baud: int, duration: int) -> None:
         print(f"ERROR: Could not open port: {e}", file=sys.stderr)
         sys.exit(1)
 
+    print(f"Delaying for {_INIT_SETTLE_SECS} seconds...")
+    time.sleep(_INIT_SETTLE_SECS)
     print(f"Sending init command: {INIT_COMMAND!r}")
     ser.write(INIT_COMMAND)
     ser.flush()
