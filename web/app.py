@@ -17,12 +17,13 @@ import threading
 import time
 import zoneinfo
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, datetime as _dt, time as _time
 from pathlib import Path
 
 import httpx
 from astral import LocationInfo
 from astral.moon import phase as moon_phase
+from astral.sun import elevation as sun_elevation
 from astral.sun import sun as astral_sun
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
@@ -132,15 +133,36 @@ async def solar():
         if p < 23.99:                return "Last Quarter"
         return "Waning Crescent"
 
+    # Sun elevation every 30 minutes across the full day
+    elevation_curve = []
+    for i in range(48):
+        m = i * 30
+        hour, minute = divmod(m, 60)
+        local_dt = _dt.combine(date.today(), _time(hour, minute), tzinfo=tz)
+        el = round(sun_elevation(loc.observer, dateandtime=local_dt), 1)
+        elevation_curve.append({"minute": m, "elevation": el})
+
     return {
-        "dawn":        s["dawn"].isoformat(),
-        "sunrise":     s["sunrise"].isoformat(),
-        "noon":        s["noon"].isoformat(),
-        "sunset":      s["sunset"].isoformat(),
-        "dusk":        s["dusk"].isoformat(),
-        "moon_phase":  round(mp, 2),
-        "moon_name":   _phase_name(mp),
+        "dawn":            s["dawn"].isoformat(),
+        "sunrise":         s["sunrise"].isoformat(),
+        "noon":            s["noon"].isoformat(),
+        "sunset":          s["sunset"].isoformat(),
+        "dusk":            s["dusk"].isoformat(),
+        "moon_phase":      round(mp, 2),
+        "moon_name":       _phase_name(mp),
+        "elevation_curve": elevation_curve,
     }
+
+
+@app.get("/api/history/day_temp")
+async def history_day_temp(day: str = "today"):
+    """Returns temperature per 5-min bucket for today or yesterday."""
+    from . import db as weather_db
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, lambda: weather_db.query_day_bucketed(day))
+    except ValueError:
+        return Response(status_code=400)
 
 
 @app.get("/api/history/recent")

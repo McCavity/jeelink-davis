@@ -41,11 +41,13 @@
     "waning_crescent": "Waning Crescent"
   },
   "charts": {
-    "temp_title":   "Temperature — last 50 readings",
-    "wind_title":   "Wind — last 50 readings",
-    "temp_label":   "Temp (°C)",
-    "speed_label":  "Speed (m/s)",
-    "gust_label":   "Gust (m/s)"
+    "temp_title":      "Temperature — 24 h",
+    "wind_title":      "Wind — last 50 readings",
+    "temp_label":      "Today (°C)",
+    "temp_yesterday":  "Yesterday (°C)",
+    "sun_label":       "Sun (°)",
+    "speed_label":     "Speed (m/s)",
+    "gust_label":      "Gust (m/s)"
   },
   "forecast": {
     "title":       "5-day Forecast",

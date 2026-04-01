@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from datetime import date, timedelta
 from pathlib import Path
 
 _db_path: Path | None = None
@@ -134,6 +135,42 @@ def query_today_minmax() -> dict:
     else:
         d["rain_mm"] = None
     return d
+
+
+def query_day_bucketed(day: str = "today") -> list[dict]:
+    """
+    Return temperature averaged per 5-minute bucket for a given calendar day.
+
+    day: 'today' | 'yesterday' | 'YYYY-MM-DD'
+    Returns list of {minute_bucket, temperature} sorted ascending.
+    """
+    if day == "today":
+        target = date.today().isoformat()
+    elif day == "yesterday":
+        target = (date.today() - timedelta(days=1)).isoformat()
+    else:
+        import re
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", day):
+            raise ValueError(f"Invalid date: {day!r}")
+        target = day
+
+    con = _get_connection()
+    rows = con.execute(
+        """
+        SELECT
+            CAST(strftime('%H', timestamp, 'localtime') AS INTEGER) * 60 +
+            (CAST(strftime('%M', timestamp, 'localtime') AS INTEGER) / 5) * 5
+                AS minute_bucket,
+            ROUND(AVG(temperature), 2) AS temperature
+        FROM readings
+        WHERE date(timestamp, 'localtime') = ?
+          AND temperature IS NOT NULL
+        GROUP BY minute_bucket
+        ORDER BY minute_bucket
+        """,
+        (target,),
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def query_stats(period: str) -> list[dict]:

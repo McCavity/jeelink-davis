@@ -219,7 +219,7 @@
   <!-- ── Charts ───────────────────────────────────────────────────────── -->
   <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
     <div class="card">
-      <div data-i18n="charts.temp_title" class="card-label">Temperature — last 50 readings</div>
+      <div data-i18n="charts.temp_title" class="card-label">Temperature — 24 h</div>
       <canvas id="temp-chart" height="120"></canvas>
     </div>
     <div class="card">
@@ -334,7 +334,9 @@ async function setLang(lang) {
 
   // Update chart dataset labels and card labels
   if (tempChart) {
-    tempChart.data.datasets[0].label = tr('charts.temp_label');
+    tempChart.data.datasets[0].label = tr('charts.sun_label');
+    tempChart.data.datasets[1].label = tr('charts.temp_yesterday');
+    tempChart.data.datasets[2].label = tr('charts.temp_label');
     tempChart.update('none');
   }
   if (windChart) {
@@ -383,15 +385,42 @@ function mergeReading(d) {
 }
 
 // ── Chart setup ────────────────────────────────────────────────────────────
-const chartLabels = [];
-const tempData    = [];
-const windData    = [];
-const gustData    = [];
+// Wind chart uses label-based x-axis (last MAX_POINTS readings)
+const chartLabels   = [];
+const windData      = [];
+const gustData      = [];
+
+// Temp chart uses minute-of-day x-axis (0–1439)
+const todayTempData = [];   // {x: minute_bucket, y: temp}  — today
+const yestTempData  = [];   // {x: minute_bucket, y: temp}  — yesterday (right of now-line)
+const sunElevData   = [];   // {x: minute,        y: elevation°} — sun position
 
 Chart.defaults.color       = 'rgb(100,116,139)';
 Chart.defaults.borderColor = 'rgb(30,41,59)';
 Chart.defaults.font.family = "'JetBrains Mono', monospace";
 Chart.defaults.font.size   = 11;
+
+// Shared plugin: red dashed vertical line at current minute of day
+const nowLinePlugin = {
+  id: 'nowLine',
+  afterDraw(chart) {
+    const now = new Date();
+    const m   = now.getHours() * 60 + now.getMinutes();
+    const x   = chart.scales.x?.getPixelForValue(m);
+    if (x == null) return;
+    const { top, bottom } = chart.chartArea;
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(239,68,68,0.75)';
+    ctx.lineWidth   = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, bottom);
+    ctx.stroke();
+    ctx.restore();
+  },
+};
 
 function makeChart(id, datasets) {
   return new Chart(document.getElementById(id), {
@@ -416,13 +445,106 @@ function makeChart(id, datasets) {
 // Charts are created after first translation load so labels are correct
 let tempChart, windChart;
 
+function initTempChart() {
+  tempChart = new Chart(document.getElementById('temp-chart'), {
+    type: 'line',
+    plugins: [nowLinePlugin],
+    data: {
+      datasets: [
+        // drawn first → background fill
+        {
+          label: tr('charts.sun_label', 'Sun (°)'),
+          data: sunElevData,
+          borderColor: 'rgba(251,191,36,0.22)',
+          backgroundColor: 'rgba(251,191,36,0.09)',
+          borderWidth: 1, pointRadius: 0,
+          fill: true, tension: 0.4,
+          yAxisID: 'ySun', order: 3,
+        },
+        // yesterday — dim dashed, right of now-line
+        {
+          label: tr('charts.temp_yesterday', 'Yesterday (°C)'),
+          data: yestTempData,
+          borderColor: 'rgba(251,191,36,0.35)',
+          borderDash: [4, 3],
+          borderWidth: 1.5, pointRadius: 0,
+          fill: false, tension: 0.3,
+          yAxisID: 'y', order: 2,
+        },
+        // today — solid, left of now-line
+        {
+          label: tr('charts.temp_label', 'Today (°C)'),
+          data: todayTempData,
+          borderColor: 'rgb(251,191,36)',
+          backgroundColor: 'rgba(251,191,36,0.06)',
+          borderWidth: 2, pointRadius: 0,
+          fill: false, tension: 0.3,
+          yAxisID: 'y', order: 1,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { boxWidth: 12, padding: 16, color: 'rgb(148,163,184)' } },
+        tooltip: {
+          backgroundColor: 'rgb(15,23,42)',
+          borderColor: 'rgb(51,65,85)',
+          borderWidth: 1,
+          callbacks: {
+            title(items) {
+              const m = items[0]?.parsed?.x;
+              if (m == null) return '';
+              const h = String(Math.floor(m / 60)).padStart(2, '0');
+              const min = String(m % 60).padStart(2, '0');
+              return `${h}:${min}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          min: 0,
+          max: 1439,
+          ticks: {
+            stepSize: 120,
+            maxRotation: 0,
+            callback: v => {
+              const h = String(Math.floor(v / 60)).padStart(2, '0');
+              const m = String(v % 60).padStart(2, '0');
+              return `${h}:${m}`;
+            },
+          },
+          grid: { color: 'rgb(30,41,59)' },
+        },
+        y: {
+          suggestedMin: -20,
+          suggestedMax: 50,
+          position: 'left',
+          grid: { color: 'rgb(30,41,59)' },
+        },
+        ySun: {
+          type: 'linear',
+          position: 'right',
+          min: -30,
+          max: 90,
+          ticks: {
+            stepSize: 30,
+            color: 'rgba(251,191,36,0.3)',
+            callback: v => v + '°',
+          },
+          grid: { drawOnChartArea: false },
+        },
+      },
+    },
+  });
+}
+
 function initCharts() {
-  tempChart = makeChart('temp-chart', [{
-    label: tr('charts.temp_label', 'Temp (°C)'),
-    data: tempData,
-    borderColor: 'rgb(251,191,36)', backgroundColor: 'rgba(251,191,36,0.08)',
-    borderWidth: 2, pointRadius: 2, fill: true, tension: 0.3,
-  }]);
+  initTempChart();
   windChart = makeChart('wind-chart', [
     {
       label: tr('charts.speed_label', 'Speed (m/s)'),
@@ -558,16 +680,29 @@ function applyReading(d) {
   mergeReading(d);
   renderState();
 
-  const label = timeOf(d.timestamp);
-  chartLabels.push(label);
-  tempData.push(d.temperature ?? null);
-  windData.push(d.wind_speed  ?? null);
-  gustData.push(d.wind_gust   ?? null);
-  if (chartLabels.length > MAX_POINTS) {
-    chartLabels.shift(); tempData.shift(); windData.shift(); gustData.shift();
+  // Temp chart: slot into 5-min bucket at today's minute-of-day position
+  if (d.temperature != null && d.timestamp) {
+    const ts     = new Date(d.timestamp);
+    const raw    = ts.getHours() * 60 + ts.getMinutes();
+    const bucket = Math.floor(raw / 5) * 5;
+    const idx    = todayTempData.findIndex(p => p.x === bucket);
+    if (idx >= 0) {
+      todayTempData[idx].y = Number(Number(d.temperature).toFixed(2));
+    } else {
+      todayTempData.push({ x: bucket, y: Number(Number(d.temperature).toFixed(2)) });
+      todayTempData.sort((a, b) => a.x - b.x);
+    }
+    tempChart?.update('none');
   }
-  tempChart.update('none');
-  windChart.update('none');
+
+  // Wind chart: label-based rolling window
+  chartLabels.push(timeOf(d.timestamp));
+  windData.push(d.wind_speed ?? null);
+  gustData.push(d.wind_gust  ?? null);
+  if (chartLabels.length > MAX_POINTS) {
+    chartLabels.shift(); windData.shift(); gustData.shift();
+  }
+  windChart?.update('none');
 }
 
 // ── Live pulse indicator ───────────────────────────────────────────────────
@@ -606,6 +741,12 @@ function applySolar(d) {
   setText('noon-val',    timeOf(d.noon));
   setText('sunset-val',  timeOf(d.sunset));
   setText('dusk-val',    timeOf(d.dusk));
+
+  if (d.elevation_curve?.length) {
+    sunElevData.length = 0;
+    sunElevData.push(...d.elevation_curve.map(e => ({ x: e.minute, y: e.elevation })));
+    tempChart?.update('none');
+  }
 }
 
 async function loadSolar() {
@@ -685,14 +826,10 @@ async function loadRecentHistory() {
     const readings = await res.json();
     for (const r of readings) {
       chartLabels.push(timeOf(r.timestamp));
-      tempData.push(r.temperature ?? null);
-      windData.push(r.wind_speed  ?? null);
-      gustData.push(r.wind_gust   ?? null);
+      windData.push(r.wind_speed ?? null);
+      gustData.push(r.wind_gust  ?? null);
     }
-    if (readings.length) {
-      tempChart.update('none');
-      windChart.update('none');
-    }
+    if (readings.length) windChart?.update('none');
   } catch (_) {}
 }
 
@@ -708,6 +845,27 @@ async function loadTodayStats() {
     if (s.humidity_max != null) setText('humidity-max-today',  fmt(s.humidity_max, 0));
     if (s.wind_gust_max != null) setText('wind-gust-max-today', fmt(s.wind_gust_max));
     if (s.rain_mm     != null) setText('rain-today-val',       fmt(s.rain_mm, 1));
+  } catch (_) {}
+}
+
+// ── 24-h temperature data ──────────────────────────────────────────────────
+async function loadDayTemp() {
+  try {
+    const [todayRes, yestRes] = await Promise.all([
+      fetch('/api/history/day_temp?day=today'),
+      fetch('/api/history/day_temp?day=yesterday'),
+    ]);
+    if (todayRes.ok) {
+      const data = await todayRes.json();
+      todayTempData.length = 0;
+      todayTempData.push(...data.map(r => ({ x: r.minute_bucket, y: r.temperature })));
+    }
+    if (yestRes.ok) {
+      const data = await yestRes.json();
+      yestTempData.length = 0;
+      yestTempData.push(...data.map(r => ({ x: r.minute_bucket, y: r.temperature })));
+    }
+    tempChart?.update('none');
   } catch (_) {}
 }
 
@@ -730,15 +888,17 @@ function connectSSE() {
   const lang = localStorage.getItem('lang') || 'en';
   await setLang(lang);
   initCharts();
-  await loadRecentHistory();   // seed charts before SSE starts
+  await loadRecentHistory();   // seed wind chart before SSE starts
   loadLatest();
   loadTodayStats();
-  loadSolar();
+  loadDayTemp();               // seed 24-h temp chart (today + yesterday)
+  loadSolar();                 // also populates sun elevation curve
   loadForecast();
   connectSSE();
 })();
 
-// Refresh solar at midnight, forecast every 30 min, today stats every 60 s
+// Refresh solar at midnight, forecast every 30 min, today stats every 60 s,
+// 24-h temp chart every 5 min (live readings also update it in real time)
 const now = new Date();
 setTimeout(() => {
   loadSolar();
@@ -746,8 +906,9 @@ setTimeout(() => {
   setInterval(loadSolar,      86_400_000);
   setInterval(loadTodayStats, 60_000);
 }, new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) - now);
-setInterval(loadForecast,   30 * 60 * 1000);
-setInterval(loadTodayStats, 60 * 1000);
+setInterval(loadForecast,    30 * 60 * 1000);
+setInterval(loadTodayStats,  60 * 1000);
+setInterval(loadDayTemp,      5 * 60 * 1000);
 </script>
 </body>
 </html>

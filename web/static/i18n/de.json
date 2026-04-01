@@ -41,11 +41,13 @@
     "waning_crescent": "Abnehmende Sichel"
   },
   "charts": {
-    "temp_title":   "Temperatur — letzte 50 Messwerte",
-    "wind_title":   "Wind — letzte 50 Messwerte",
-    "temp_label":   "Temp. (°C)",
-    "speed_label":  "Geschw. (m/s)",
-    "gust_label":   "Böe (m/s)"
+    "temp_title":      "Temperatur — 24 Std.",
+    "wind_title":      "Wind — letzte 50 Messwerte",
+    "temp_label":      "Heute (°C)",
+    "temp_yesterday":  "Gestern (°C)",
+    "sun_label":       "Sonne (°)",
+    "speed_label":     "Geschw. (m/s)",
+    "gust_label":      "Böe (m/s)"
   },
   "forecast": {
     "title":       "5-Tage-Vorhersage",
