@@ -400,7 +400,7 @@ Chart.defaults.borderColor = 'rgb(30,41,59)';
 Chart.defaults.font.family = "'JetBrains Mono', monospace";
 Chart.defaults.font.size   = 11;
 
-// Shared plugin: red dashed vertical line at current minute of day
+// Shared plugin: red dashed "now" line + sun symbol at current elevation
 const nowLinePlugin = {
   id: 'nowLine',
   afterDraw(chart) {
@@ -410,6 +410,8 @@ const nowLinePlugin = {
     if (x == null) return;
     const { top, bottom } = chart.chartArea;
     const ctx = chart.ctx;
+
+    // Red dashed vertical "now" line
     ctx.save();
     ctx.strokeStyle = 'rgba(239,68,68,0.75)';
     ctx.lineWidth   = 1.5;
@@ -419,6 +421,36 @@ const nowLinePlugin = {
     ctx.lineTo(x, bottom);
     ctx.stroke();
     ctx.restore();
+
+    // Sun symbol at current elevation on the ySun axis
+    const ySun = chart.scales.ySun;
+    if (ySun && sunElevData.length) {
+      const closest = sunElevData.reduce((best, pt) =>
+        Math.abs(pt.x - m) < Math.abs(best.x - m) ? pt : best);
+      const sy = ySun.getPixelForValue(closest.y);
+      if (sy >= top && sy <= bottom) {
+        const R = 5, r1 = 8, r2 = 12, rays = 8;
+        ctx.save();
+        ctx.translate(x, sy);
+        ctx.fillStyle   = 'rgba(251,191,36,0.95)';
+        ctx.strokeStyle = 'rgba(251,191,36,0.95)';
+        ctx.lineWidth   = 1.5;
+        ctx.setLineDash([]);
+        // Circle
+        ctx.beginPath();
+        ctx.arc(0, 0, R, 0, Math.PI * 2);
+        ctx.fill();
+        // Rays
+        for (let i = 0; i < rays; i++) {
+          const a = (i / rays) * Math.PI * 2 - Math.PI / 2;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1);
+          ctx.lineTo(Math.cos(a) * r2, Math.sin(a) * r2);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+    }
   },
 };
 
@@ -509,14 +541,14 @@ function initTempChart() {
           type: 'linear',
           min: 0,
           max: 1439,
+          afterBuildTicks(axis) {
+            // Pin ticks at exact 2-hour intervals to avoid float precision issues
+            axis.ticks = [0,120,240,360,480,600,720,840,960,1080,1200,1320]
+              .map(v => ({ value: v }));
+          },
           ticks: {
-            stepSize: 120,
             maxRotation: 0,
-            callback: v => {
-              const h = String(Math.floor(v / 60)).padStart(2, '0');
-              const m = String(v % 60).padStart(2, '0');
-              return `${h}:${m}`;
-            },
+            callback: v => `${String(Math.floor(v / 60)).padStart(2,'0')}:00`,
           },
           grid: { color: 'rgb(30,41,59)' },
         },
