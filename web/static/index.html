@@ -102,6 +102,13 @@
       padding: 0.2rem 0.5rem; font-size: 0.72rem; font-family: 'JetBrains Mono', monospace;
       color: rgb(203 213 225); color-scheme: dark;
     }
+    .hist-nav {
+      padding: 0 0.3rem; font-size: 1rem; line-height: 1; font-weight: 600;
+      color: rgb(100 116 139); background: transparent; border: none;
+      cursor: pointer; transition: color 0.15s; user-select: none;
+    }
+    .hist-nav:hover:not(:disabled) { color: rgb(203 213 225); }
+    .hist-nav:disabled { color: rgb(51 65 85); cursor: default; }
     .page-tab {
       padding: 0.4rem 1.4rem; font-size: 0.82rem; font-weight: 600; cursor: pointer;
       color: rgb(100 116 139); background: transparent;
@@ -326,7 +333,9 @@
       <!-- Header row: title | centred range label | period buttons + custom range -->
       <div class="flex flex-wrap items-center gap-3 mb-4">
         <div data-i18n="history.title" class="card-label" style="margin-bottom:0">Historical Data</div>
+        <button id="hist-prev" class="hist-nav" onclick="shiftHistory(-1)">&#8249;</button>
         <span id="hist-range-label" class="flex-1 text-center text-xs mono text-slate-400">—</span>
+        <button id="hist-next" class="hist-nav" onclick="shiftHistory(+1)" disabled>&#8250;</button>
         <div class="flex gap-1">
           <button class="hist-btn active" data-period="1D" onclick="setHistPeriod('1D')">1D</button>
           <button class="hist-btn" data-period="7D"  onclick="setHistPeriod('7D')">7D</button>
@@ -1000,13 +1009,26 @@ let histChart  = null;
 let histData   = null;
 let histPeriod = '1D';
 let histMetric = 'temp';
+let histStart  = null;
+let histEnd    = null;
 
 function setHistPeriod(p) {
   histPeriod = p;
   document.querySelectorAll('.hist-btn[data-period]').forEach(b =>
     b.classList.toggle('active', b.dataset.period === p));
   document.getElementById('hist-custom-range').classList.toggle('hidden', p !== 'custom');
-  if (p !== 'custom') loadHistory();
+  if (p !== 'custom') {
+    const today = new Date();
+    const fmt   = d => d.toISOString().slice(0, 10);
+    const sub   = days => { const d = new Date(today); d.setDate(d.getDate() - days); return d; };
+    switch (p) {
+      case '1D': histStart = fmt(today);    histEnd = fmt(today);    break;
+      case '7D': histStart = fmt(sub(6));   histEnd = fmt(today);    break;
+      case '1M': histStart = fmt(sub(29));  histEnd = fmt(today);    break;
+      case '1Y': histStart = fmt(sub(364)); histEnd = fmt(today);    break;
+    }
+    loadHistory();
+  }
 }
 
 function setHistMetric(m) {
@@ -1016,30 +1038,34 @@ function setHistMetric(m) {
   renderHistChart();
 }
 
-function histDateRange() {
-  const today = new Date();
-  const fmt   = d => d.toISOString().slice(0, 10);
-  const sub   = days => { const d = new Date(today); d.setDate(d.getDate() - days); return d; };
-  switch (histPeriod) {
-    case '1D':     return { start: fmt(today),    end: fmt(today) };
-    case '7D':     return { start: fmt(sub(6)),   end: fmt(today) };
-    case '1M':     return { start: fmt(sub(29)),  end: fmt(today) };
-    case '1Y':     return { start: fmt(sub(364)), end: fmt(today) };
-    case 'custom': return {
-      start: document.getElementById('hist-start').value,
-      end:   document.getElementById('hist-end').value,
-    };
-  }
-}
-
 function updateHistRangeLabel() {
-  const { start, end } = histDateRange();
-  if (!start || !end) return;
+  if (!histStart || !histEnd) return;
   const locale = currentLang === 'de' ? 'de-DE' : 'en-GB';
   const fmtDate = iso => new Date(iso + 'T12:00:00')
     .toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const label = start === end ? fmtDate(start) : `${fmtDate(start)} – ${fmtDate(end)}`;
+  const label = histStart === histEnd ? fmtDate(histStart) : `${fmtDate(histStart)} – ${fmtDate(histEnd)}`;
   setText('hist-range-label', label);
+}
+
+function updateHistNavButtons() {
+  const today = new Date().toISOString().slice(0, 10);
+  const nextBtn = document.getElementById('hist-next');
+  if (nextBtn) nextBtn.disabled = !histEnd || histEnd >= today;
+}
+
+function shiftHistory(dir) {
+  if (!histStart || !histEnd) return;
+  const s    = new Date(histStart + 'T12:00:00');
+  const e    = new Date(histEnd   + 'T12:00:00');
+  const span = Math.round((e - s) / 86400000) + 1;  // range width in days
+  s.setDate(s.getDate() + dir * span);
+  e.setDate(e.getDate() + dir * span);
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  if (e > today) return;
+  const fmt = d => d.toISOString().slice(0, 10);
+  histStart = fmt(s);
+  histEnd   = fmt(e);
+  loadHistory();
 }
 
 function histFormatLabel(bucket, bucketMinutes) {
@@ -1062,10 +1088,15 @@ function histFormatLabel(bucket, bucketMinutes) {
 }
 
 async function loadHistory() {
-  const { start, end } = histDateRange();
+  if (histPeriod === 'custom') {
+    histStart = document.getElementById('hist-start').value;
+    histEnd   = document.getElementById('hist-end').value;
+  }
+  const start = histStart, end = histEnd;
   if (!start || !end || start > end) return;
 
   updateHistRangeLabel();
+  updateHistNavButtons();
   document.getElementById('hist-loading').style.display = 'flex';
   try {
     const res = await fetch(`/api/history/range?start=${start}&end=${end}`);
