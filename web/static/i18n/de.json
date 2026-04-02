@@ -6,7 +6,9 @@
     "live":         "Live",
     "reconnecting": "Verbinde…",
     "battery_ok":   "OK",
-    "battery_low":  "SCHWACH"
+    "battery_low":  "SCHWACH",
+    "tab_live":     "Live",
+    "tab_history":  "Verlauf"
   },
   "cards": {
     "temperature":    "Temperatur",

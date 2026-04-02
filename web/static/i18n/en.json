@@ -6,7 +6,9 @@
     "live":         "Live",
     "reconnecting": "Reconnecting…",
     "battery_ok":   "OK",
-    "battery_low":  "LOW"
+    "battery_low":  "LOW",
+    "tab_live":     "Live",
+    "tab_history":  "History"
   },
   "cards": {
     "temperature":    "Temperature",

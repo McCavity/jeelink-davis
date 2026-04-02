@@ -102,6 +102,13 @@
       padding: 0.2rem 0.5rem; font-size: 0.72rem; font-family: 'JetBrains Mono', monospace;
       color: rgb(203 213 225); color-scheme: dark;
     }
+    .page-tab {
+      padding: 0.4rem 1.4rem; font-size: 0.82rem; font-weight: 600; cursor: pointer;
+      color: rgb(100 116 139); background: transparent;
+      border: none; border-bottom: 2px solid transparent; transition: all 0.15s;
+    }
+    .page-tab:hover { color: rgb(148 163 184); }
+    .page-tab.active { color: rgb(203 213 225); border-bottom-color: rgb(56 189 248); }
   </style>
 </head>
 <body class="min-h-screen text-slate-100 p-4 md:p-6">
@@ -146,6 +153,15 @@
 
     </div>
   </div>
+
+  <!-- ── Page tabs ───────────────────────────────────────────────────── -->
+  <div class="max-w-7xl mx-auto mb-4 border-b border-slate-800">
+    <button id="tab-live"    class="page-tab active" onclick="setTab('live')"    data-i18n="ui.tab_live">Live</button>
+    <button id="tab-history" class="page-tab"        onclick="setTab('history')" data-i18n="ui.tab_history">History</button>
+  </div>
+
+  <!-- ── Live section ─────────────────────────────────────────────────── -->
+  <div id="section-live">
 
   <!-- ── Reading cards ────────────────────────────────────────────────── -->
   <div class="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-4">
@@ -299,14 +315,19 @@
     </div>
   </div>
 
+  </div><!-- /section-live -->
+
+  <!-- ── History section ──────────────────────────────────────────────── -->
+  <div id="section-history" class="hidden">
   <!-- ── History ──────────────────────────────────────────────────────── -->
   <div class="max-w-7xl mx-auto mb-4">
     <div class="card">
 
-      <!-- Header row: title + period buttons + custom range -->
+      <!-- Header row: title | centred range label | period buttons + custom range -->
       <div class="flex flex-wrap items-center gap-3 mb-4">
         <div data-i18n="history.title" class="card-label" style="margin-bottom:0">Historical Data</div>
-        <div class="flex gap-1 ml-auto">
+        <span id="hist-range-label" class="flex-1 text-center text-xs mono text-slate-400">—</span>
+        <div class="flex gap-1">
           <button class="hist-btn active" data-period="1D" onclick="setHistPeriod('1D')">1D</button>
           <button class="hist-btn" data-period="7D"  onclick="setHistPeriod('7D')">7D</button>
           <button class="hist-btn" data-period="1M"  onclick="setHistPeriod('1M')">1M</button>
@@ -342,6 +363,8 @@
 
     </div>
   </div>
+
+  </div><!-- /section-history -->
 
   <!-- ── Footer ───────────────────────────────────────────────────────── -->
   <div class="max-w-7xl mx-auto mt-2 text-center text-xs text-slate-700 pb-4">
@@ -964,6 +987,14 @@ async function loadDayTemp() {
   } catch (_) {}
 }
 
+// ── Page tabs ──────────────────────────────────────────────────────────────
+function setTab(tab) {
+  document.getElementById('section-live').classList.toggle('hidden',    tab !== 'live');
+  document.getElementById('section-history').classList.toggle('hidden', tab !== 'history');
+  document.getElementById('tab-live').classList.toggle('active',    tab === 'live');
+  document.getElementById('tab-history').classList.toggle('active',  tab === 'history');
+}
+
 // ── History section ────────────────────────────────────────────────────────
 let histChart  = null;
 let histData   = null;
@@ -1001,6 +1032,16 @@ function histDateRange() {
   }
 }
 
+function updateHistRangeLabel() {
+  const { start, end } = histDateRange();
+  if (!start || !end) return;
+  const locale = currentLang === 'de' ? 'de-DE' : 'en-GB';
+  const fmtDate = iso => new Date(iso + 'T12:00:00')
+    .toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const label = start === end ? fmtDate(start) : `${fmtDate(start)} – ${fmtDate(end)}`;
+  setText('hist-range-label', label);
+}
+
 function histFormatLabel(bucket, bucketMinutes) {
   const locale = currentLang === 'de' ? 'de-DE' : 'en-GB';
   const dt = bucketMinutes < 1440
@@ -1024,6 +1065,7 @@ async function loadHistory() {
   const { start, end } = histDateRange();
   if (!start || !end || start > end) return;
 
+  updateHistRangeLabel();
   document.getElementById('hist-loading').style.display = 'flex';
   try {
     const res = await fetch(`/api/history/range?start=${start}&end=${end}`);
