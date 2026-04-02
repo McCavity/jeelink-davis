@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Sun rays (6 rays, upper-left quadrant) -->
+  <g stroke="#F59E0B" stroke-width="2" stroke-linecap="round">
+    <line x1="10" y1="1"  x2="10" y2="4"/>
+    <line x1="1"  y1="10" x2="4"  y2="10"/>
+    <line x1="3.2" y1="3.2"  x2="5.5" y2="5.5"/>
+    <line x1="16.8" y1="3.2" x2="14.5" y2="5.5"/>
+    <line x1="19"  y1="10" x2="16"  y2="10"/>
+    <line x1="3.2" y1="16.8" x2="5.5" y2="14.5"/>
+  </g>
+  <!-- Sun body -->
+  <circle cx="10" cy="10" r="5.5" fill="#FCD34D"/>
+  <!-- Cloud: three overlapping circles + filled base rect -->
+  <circle cx="16" cy="24" r="5"   fill="#CBD5E1"/>
+  <circle cx="21" cy="21" r="6.5" fill="#CBD5E1"/>
+  <circle cx="26" cy="24" r="4.5" fill="#CBD5E1"/>
+  <rect   x="14"  y="22"  width="15" height="10" fill="#CBD5E1"/>
+</svg>

@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Davis Weather Station</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <style>
@@ -362,8 +363,11 @@
       <!-- Chart -->
       <div id="hist-chart-wrap" style="position:relative;min-height:140px">
         <canvas id="hist-chart" height="110"></canvas>
-        <div id="hist-loading" class="absolute inset-0 flex items-center justify-center text-slate-600 text-sm">
+        <div id="hist-loading" class="absolute inset-0 flex items-center justify-center text-slate-600 text-sm" style="display:none">
           <span data-i18n="history.loading">Loading…</span>
+        </div>
+        <div id="hist-nodata" class="absolute inset-0 flex items-center justify-center text-slate-600 text-sm" style="display:none">
+          <span data-i18n="history.no_data">No data</span>
         </div>
       </div>
 
@@ -1102,6 +1106,9 @@ async function loadHistory() {
     const res = await fetch(`/api/history/range?start=${start}&end=${end}`);
     if (!res.ok) return;
     histData = await res.json();
+    const hasData = histData?.data?.length > 0;
+    document.getElementById('hist-nodata').style.display = hasData ? 'none' : 'flex';
+    if (!hasData) { document.getElementById('hist-stats').innerHTML = ''; }
     renderHistChart();
     renderHistStats();
   } catch (_) {
@@ -1111,7 +1118,10 @@ async function loadHistory() {
 }
 
 function renderHistChart() {
-  if (!histData?.data?.length) return;
+  if (!histData?.data?.length) {
+    histChart?.destroy(); histChart = null;
+    return;
+  }
 
   const bm     = histData.bucket_minutes;
   const labels = histData.data.map(r => histFormatLabel(r.bucket, bm));

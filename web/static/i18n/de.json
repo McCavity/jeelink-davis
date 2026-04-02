@@ -63,6 +63,7 @@
     "title":        "Historische Daten",
     "apply":        "Anwenden",
     "loading":      "Lade…",
+    "no_data":      "Keine Daten für diesen Zeitraum",
     "temp":         "Temp.",
     "rain":         "Regen",
     "wind":         "Wind",
