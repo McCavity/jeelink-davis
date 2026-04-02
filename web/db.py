@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+import re
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -171,6 +172,75 @@ def query_day_bucketed(day: str = "today") -> list[dict]:
         (target,),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def query_range_bucketed(start: str, end: str) -> dict:
+    """
+    Return aggregated readings for the inclusive date range [start, end].
+
+    start / end: 'YYYY-MM-DD' (localtime dates)
+
+    Bucket size is chosen automatically so the result has ≤ ~400 rows:
+      ≤ 1 day  →  5-min buckets
+      ≤ 7 days →  1-hour buckets
+      ≤ 31 days → 6-hour buckets
+      > 31 days → daily buckets
+
+    Returns {bucket_minutes: int, data: [{bucket, temp_min, temp_avg,
+      temp_max, humidity_avg, wind_avg, wind_gust_max, rain_mm}, ...]}
+    """
+    for d in (start, end):
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", d):
+            raise ValueError(f"Invalid date: {d!r}")
+
+    days = (date.fromisoformat(end) - date.fromisoformat(start)).days + 1
+
+    if days <= 1:
+        bucket_minutes = 5
+        bucket_sql = """
+            strftime('%Y-%m-%d %H:', timestamp, 'localtime') ||
+            printf('%02d',
+                (CAST(strftime('%M', timestamp, 'localtime') AS INTEGER) / 5) * 5)
+        """
+    elif days <= 7:
+        bucket_minutes = 60
+        bucket_sql = "strftime('%Y-%m-%d %H:00', timestamp, 'localtime')"
+    elif days <= 31:
+        bucket_minutes = 360
+        bucket_sql = """
+            strftime('%Y-%m-%d ', timestamp, 'localtime') ||
+            printf('%02d:00',
+                (CAST(strftime('%H', timestamp, 'localtime') AS INTEGER) / 6) * 6)
+        """
+    else:
+        bucket_minutes = 1440
+        bucket_sql = "strftime('%Y-%m-%d', timestamp, 'localtime')"
+
+    con = _get_connection()
+    rows = con.execute(
+        f"""
+        SELECT
+            ({bucket_sql})                              AS bucket,
+            ROUND(MIN(temperature), 1)                 AS temp_min,
+            ROUND(AVG(temperature), 1)                 AS temp_avg,
+            ROUND(MAX(temperature), 1)                 AS temp_max,
+            ROUND(AVG(humidity), 0)                    AS humidity_avg,
+            ROUND(AVG(wind_speed), 1)                  AS wind_avg,
+            ROUND(MAX(wind_gust), 1)                   AS wind_gust_max,
+            CASE
+                WHEN MAX(rain_tip_count) >= MIN(rain_tip_count)
+                THEN ROUND((MAX(rain_tip_count) - MIN(rain_tip_count)) * 0.2, 1)
+                ELSE 0.0
+            END                                        AS rain_mm
+        FROM readings
+        WHERE date(timestamp, 'localtime') BETWEEN ? AND ?
+        GROUP BY bucket
+        ORDER BY bucket
+        """,
+        (start, end),
+    ).fetchall()
+
+    return {"bucket_minutes": bucket_minutes, "data": [dict(r) for r in rows]}
 
 
 def query_stats(period: str) -> list[dict]:

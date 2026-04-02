@@ -83,6 +83,25 @@
     .lang-btn.active  { opacity: 1; }
     .lang-btn.inactive { opacity: 0.35; }
     .lang-btn:hover   { opacity: 0.8; }
+    .hist-btn {
+      padding: 0.25rem 0.65rem; border-radius: 0.375rem; cursor: pointer; transition: all 0.15s;
+      font-size: 0.72rem; font-weight: 600; font-family: 'JetBrains Mono', monospace;
+      color: rgb(100 116 139); background: rgb(30 41 59); border: 1px solid transparent;
+    }
+    .hist-btn:hover { color: rgb(148 163 184); }
+    .hist-btn.active { color: rgb(203 213 225); background: rgb(51 65 85); border-color: rgb(71 85 105); }
+    .hist-tab {
+      padding: 0.2rem 0.65rem; border-radius: 0.375rem; cursor: pointer; transition: all 0.15s;
+      font-size: 0.72rem; font-weight: 600; color: rgb(100 116 139);
+      background: transparent; border: 1px solid transparent;
+    }
+    .hist-tab:hover { color: rgb(148 163 184); }
+    .hist-tab.active { color: rgb(203 213 225); border-color: rgb(51 65 85); }
+    .hist-date-input {
+      background: rgb(30 41 59); border: 1px solid rgb(51 65 85); border-radius: 0.375rem;
+      padding: 0.2rem 0.5rem; font-size: 0.72rem; font-family: 'JetBrains Mono', monospace;
+      color: rgb(203 213 225); color-scheme: dark;
+    }
   </style>
 </head>
 <body class="min-h-screen text-slate-100 p-4 md:p-6">
@@ -277,6 +296,50 @@
           <span id="dusk-val" class="solar-time">—</span>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ── History ──────────────────────────────────────────────────────── -->
+  <div class="max-w-7xl mx-auto mb-4">
+    <div class="card">
+
+      <!-- Header row: title + period buttons + custom range -->
+      <div class="flex flex-wrap items-center gap-3 mb-4">
+        <div data-i18n="history.title" class="card-label" style="margin-bottom:0">Historical Data</div>
+        <div class="flex gap-1 ml-auto">
+          <button class="hist-btn active" data-period="1D" onclick="setHistPeriod('1D')">1D</button>
+          <button class="hist-btn" data-period="7D"  onclick="setHistPeriod('7D')">7D</button>
+          <button class="hist-btn" data-period="1M"  onclick="setHistPeriod('1M')">1M</button>
+          <button class="hist-btn" data-period="1Y"  onclick="setHistPeriod('1Y')">1Y</button>
+          <button class="hist-btn" data-period="custom" onclick="setHistPeriod('custom')" title="Custom range">…</button>
+        </div>
+        <div id="hist-custom-range" class="hidden flex items-center gap-2">
+          <input type="date" id="hist-start" class="hist-date-input" />
+          <span class="text-slate-600 text-xs">→</span>
+          <input type="date" id="hist-end"   class="hist-date-input" />
+          <button class="hist-btn active" onclick="loadHistory()" data-i18n="history.apply">Apply</button>
+        </div>
+      </div>
+
+      <!-- Metric tabs -->
+      <div class="flex gap-1 mb-4">
+        <button class="hist-tab active" data-metric="temp"     onclick="setHistMetric('temp')"     data-i18n="history.temp">Temp</button>
+        <button class="hist-tab"        data-metric="rain"     onclick="setHistMetric('rain')"     data-i18n="history.rain">Rain</button>
+        <button class="hist-tab"        data-metric="wind"     onclick="setHistMetric('wind')"     data-i18n="history.wind">Wind</button>
+        <button class="hist-tab"        data-metric="humidity" onclick="setHistMetric('humidity')" data-i18n="history.humidity">Humidity</button>
+      </div>
+
+      <!-- Chart -->
+      <div id="hist-chart-wrap" style="position:relative;min-height:140px">
+        <canvas id="hist-chart" height="110"></canvas>
+        <div id="hist-loading" class="absolute inset-0 flex items-center justify-center text-slate-600 text-sm">
+          <span data-i18n="history.loading">Loading…</span>
+        </div>
+      </div>
+
+      <!-- Stats strip -->
+      <div id="hist-stats" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4"></div>
+
     </div>
   </div>
 
@@ -901,6 +964,209 @@ async function loadDayTemp() {
   } catch (_) {}
 }
 
+// ── History section ────────────────────────────────────────────────────────
+let histChart  = null;
+let histData   = null;
+let histPeriod = '1D';
+let histMetric = 'temp';
+
+function setHistPeriod(p) {
+  histPeriod = p;
+  document.querySelectorAll('.hist-btn[data-period]').forEach(b =>
+    b.classList.toggle('active', b.dataset.period === p));
+  document.getElementById('hist-custom-range').classList.toggle('hidden', p !== 'custom');
+  if (p !== 'custom') loadHistory();
+}
+
+function setHistMetric(m) {
+  histMetric = m;
+  document.querySelectorAll('.hist-tab').forEach(b =>
+    b.classList.toggle('active', b.dataset.metric === m));
+  renderHistChart();
+}
+
+function histDateRange() {
+  const today = new Date();
+  const fmt   = d => d.toISOString().slice(0, 10);
+  const sub   = days => { const d = new Date(today); d.setDate(d.getDate() - days); return d; };
+  switch (histPeriod) {
+    case '1D':     return { start: fmt(today),    end: fmt(today) };
+    case '7D':     return { start: fmt(sub(6)),   end: fmt(today) };
+    case '1M':     return { start: fmt(sub(29)),  end: fmt(today) };
+    case '1Y':     return { start: fmt(sub(364)), end: fmt(today) };
+    case 'custom': return {
+      start: document.getElementById('hist-start').value,
+      end:   document.getElementById('hist-end').value,
+    };
+  }
+}
+
+function histFormatLabel(bucket, bucketMinutes) {
+  const locale = currentLang === 'de' ? 'de-DE' : 'en-GB';
+  const dt = bucketMinutes < 1440
+    ? new Date(bucket.replace(' ', 'T'))          // "YYYY-MM-DD HH:MM" → local
+    : new Date(bucket + 'T12:00:00');              // "YYYY-MM-DD" → local noon
+  if (bucketMinutes <= 60) {
+    // Single day or week: show time only / date + time
+    return bucketMinutes <= 5
+      ? dt.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+      : dt.toLocaleDateString(locale, { month: '2-digit', day: '2-digit' }) + ' ' +
+        dt.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+  }
+  if (bucketMinutes < 1440) {
+    return dt.toLocaleDateString(locale, { month: '2-digit', day: '2-digit' }) + ' ' +
+           dt.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+  }
+  return dt.toLocaleDateString(locale, { month: '2-digit', day: '2-digit' });
+}
+
+async function loadHistory() {
+  const { start, end } = histDateRange();
+  if (!start || !end || start > end) return;
+
+  document.getElementById('hist-loading').style.display = 'flex';
+  try {
+    const res = await fetch(`/api/history/range?start=${start}&end=${end}`);
+    if (!res.ok) return;
+    histData = await res.json();
+    renderHistChart();
+    renderHistStats();
+  } catch (_) {
+  } finally {
+    document.getElementById('hist-loading').style.display = 'none';
+  }
+}
+
+function renderHistChart() {
+  if (!histData?.data?.length) return;
+
+  const bm     = histData.bucket_minutes;
+  const labels = histData.data.map(r => histFormatLabel(r.bucket, bm));
+  const d      = histData.data;
+  const isBar  = histMetric === 'rain';
+
+  let datasets;
+  if (histMetric === 'temp') {
+    datasets = [
+      // Min line + fill to max → temperature band
+      {
+        label: tr('history.temp_min', 'Min °C'),
+        data: d.map(r => r.temp_min),
+        borderColor: 'rgba(56,189,248,0.7)',
+        backgroundColor: 'rgba(148,163,184,0.12)',
+        borderWidth: 1, pointRadius: 0,
+        fill: '+1', tension: 0.3,
+      },
+      {
+        label: tr('history.temp_max', 'Max °C'),
+        data: d.map(r => r.temp_max),
+        borderColor: 'rgba(251,191,36,0.7)',
+        borderWidth: 1, pointRadius: 0,
+        fill: false, tension: 0.3,
+      },
+      {
+        label: tr('history.temp_avg', 'Avg °C'),
+        data: d.map(r => r.temp_avg),
+        borderColor: 'rgb(251,191,36)',
+        borderWidth: 2, pointRadius: 0,
+        fill: false, tension: 0.3,
+      },
+    ];
+  } else if (histMetric === 'rain') {
+    datasets = [{
+      label: tr('history.rain_mm', 'Rain mm'),
+      data: d.map(r => r.rain_mm ?? 0),
+      backgroundColor: 'rgba(96,165,250,0.65)',
+      borderColor: 'rgb(96,165,250)',
+      borderWidth: 1,
+    }];
+  } else if (histMetric === 'wind') {
+    datasets = [
+      {
+        label: tr('history.wind_avg', 'Avg m/s'),
+        data: d.map(r => r.wind_avg),
+        borderColor: 'rgb(56,189,248)',
+        backgroundColor: 'rgba(56,189,248,0.08)',
+        borderWidth: 2, pointRadius: 0,
+        fill: true, tension: 0.3,
+      },
+      {
+        label: tr('history.wind_gust', 'Gust m/s'),
+        data: d.map(r => r.wind_gust_max),
+        borderColor: 'rgba(56,189,248,0.45)',
+        borderDash: [4, 3],
+        borderWidth: 1.5, pointRadius: 0,
+        fill: false, tension: 0.3,
+      },
+    ];
+  } else {
+    datasets = [{
+      label: tr('history.humidity_avg', 'Humidity %'),
+      data: d.map(r => r.humidity_avg),
+      borderColor: 'rgb(167,139,250)',
+      backgroundColor: 'rgba(167,139,250,0.08)',
+      borderWidth: 2, pointRadius: 0,
+      fill: true, tension: 0.3,
+    }];
+  }
+
+  if (histChart) histChart.destroy();
+  histChart = new Chart(document.getElementById('hist-chart'), {
+    type: isBar ? 'bar' : 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { boxWidth: 12, padding: 16, color: 'rgb(148,163,184)' } },
+        tooltip: { backgroundColor: 'rgb(15,23,42)', borderColor: 'rgb(51,65,85)', borderWidth: 1 },
+      },
+      scales: {
+        x: { ticks: { maxTicksLimit: 10, maxRotation: 0 }, grid: { color: 'rgb(30,41,59)' } },
+        y: {
+          grid: { color: 'rgb(30,41,59)' },
+          ...(histMetric === 'temp'     ? { suggestedMin: -20, suggestedMax: 50 } : {}),
+          ...(histMetric === 'humidity' ? { min: 0, max: 100 }                    : {}),
+          ...(histMetric === 'rain'     ? { min: 0 }                              : {}),
+        },
+      },
+    },
+  });
+}
+
+function renderHistStats() {
+  if (!histData?.data?.length) return;
+  const d = histData.data;
+
+  const vals = key => d.map(r => r[key]).filter(v => v != null);
+  const avg  = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+
+  const allMin  = vals('temp_min');
+  const allAvg  = vals('temp_avg');
+  const allMax  = vals('temp_max');
+  const allGust = vals('wind_gust_max');
+  const allHum  = vals('humidity_avg');
+  const rain    = d.reduce((s, r) => s + (r.rain_mm ?? 0), 0);
+
+  const tempStr = allMin.length
+    ? `${Math.min(...allMin).toFixed(1)} / ${avg(allAvg).toFixed(1)} / ${Math.max(...allMax).toFixed(1)} °C`
+    : '—';
+
+  const el = (label, val) => `
+    <div class="bg-slate-900 rounded-lg p-3 text-center">
+      <div class="text-slate-600 text-xs mb-1">${label}</div>
+      <div class="mono text-slate-200 text-sm font-semibold">${val}</div>
+    </div>`;
+
+  document.getElementById('hist-stats').innerHTML = [
+    el(tr('history.stats_temp',  'Temp min / avg / max'), tempStr),
+    el(tr('history.stats_gust',  'Max gust'),    allGust.length ? `${Math.max(...allGust).toFixed(1)} m/s` : '—'),
+    el(tr('history.stats_rain',  'Total rain'),  `${rain.toFixed(1)} mm`),
+    el(tr('history.stats_hum',   'Avg humidity'), allHum.length  ? `${avg(allHum).toFixed(0)} %` : '—'),
+  ].join('');
+}
+
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 async function loadLatest() {
   try {
@@ -919,6 +1185,13 @@ function connectSSE() {
 (async () => {
   const lang = localStorage.getItem('lang') || 'en';
   await setLang(lang);
+
+  // Pre-fill custom date pickers (default: last 7 days)
+  const today = new Date();
+  const sub7  = new Date(today); sub7.setDate(sub7.getDate() - 6);
+  document.getElementById('hist-end').value   = today.toISOString().slice(0, 10);
+  document.getElementById('hist-start').value = sub7.toISOString().slice(0, 10);
+
   initCharts();
   await loadRecentHistory();   // seed wind chart before SSE starts
   loadLatest();
@@ -926,6 +1199,7 @@ function connectSSE() {
   loadDayTemp();               // seed 24-h temp chart (today + yesterday)
   loadSolar();                 // also populates sun elevation curve
   loadForecast();
+  loadHistory();               // seed history section (default: 1D)
   connectSSE();
 })();
 

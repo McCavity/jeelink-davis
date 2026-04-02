@@ -165,6 +165,17 @@ async def history_day_temp(day: str = "today"):
         return Response(status_code=400)
 
 
+@app.get("/api/history/range")
+async def history_range(start: str, end: str):
+    """Returns auto-bucketed readings for a localtime date range."""
+    from . import db as weather_db
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, lambda: weather_db.query_range_bucketed(start, end))
+    except ValueError:
+        return Response(status_code=400)
+
+
 @app.get("/api/history/recent")
 async def history_recent(n: int = 50):
     """Last n readings in chronological order, for chart pre-seeding."""

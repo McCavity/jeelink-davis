@@ -57,6 +57,26 @@
     "by":          "Vorhersage von",
     "days":        ["So","Mo","Di","Mi","Do","Fr","Sa"]
   },
+  "history": {
+    "title":        "Historische Daten",
+    "apply":        "Anwenden",
+    "loading":      "Lade…",
+    "temp":         "Temp.",
+    "rain":         "Regen",
+    "wind":         "Wind",
+    "humidity":     "Feuchte",
+    "temp_min":     "Min °C",
+    "temp_avg":     "Mittel °C",
+    "temp_max":     "Max °C",
+    "rain_mm":      "Regen mm",
+    "wind_avg":     "Mittel m/s",
+    "wind_gust":    "Böe m/s",
+    "humidity_avg": "Feuchte %",
+    "stats_temp":   "Temp Min / Mittel / Max",
+    "stats_gust":   "Max-Böe",
+    "stats_rain":   "Gesamtniederschlag",
+    "stats_hum":    "Mittl. Feuchte"
+  },
   "wmo": {
     "0":  "Klarer Himmel",
     "1":  "Überwiegend klar",

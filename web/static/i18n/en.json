@@ -57,6 +57,26 @@
     "by":          "Forecast by",
     "days":        ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]
   },
+  "history": {
+    "title":        "Historical Data",
+    "apply":        "Apply",
+    "loading":      "Loading…",
+    "temp":         "Temp",
+    "rain":         "Rain",
+    "wind":         "Wind",
+    "humidity":     "Humidity",
+    "temp_min":     "Min °C",
+    "temp_avg":     "Avg °C",
+    "temp_max":     "Max °C",
+    "rain_mm":      "Rain mm",
+    "wind_avg":     "Avg m/s",
+    "wind_gust":    "Gust m/s",
+    "humidity_avg": "Humidity %",
+    "stats_temp":   "Temp min / avg / max",
+    "stats_gust":   "Max gust",
+    "stats_rain":   "Total rain",
+    "stats_hum":    "Avg humidity"
+  },
   "wmo": {
     "0":  "Clear sky",
     "1":  "Mainly clear",
