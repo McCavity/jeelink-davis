@@ -42,6 +42,16 @@ CREATE TABLE IF NOT EXISTS readings (
 );
 
 CREATE INDEX IF NOT EXISTS idx_readings_timestamp ON readings (timestamp);
+
+CREATE TABLE IF NOT EXISTS indoor_readings (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp   TEXT NOT NULL,
+    temperature REAL,
+    humidity    REAL,
+    pressure    REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_indoor_ts ON indoor_readings (timestamp);
 """
 
 
@@ -87,6 +97,53 @@ def insert_reading(payload: dict) -> None:
         payload,
     )
     con.commit()
+
+
+def insert_indoor_reading(payload: dict) -> None:
+    """Insert a single BME280 reading dict."""
+    con = _get_connection()
+    con.execute(
+        """
+        INSERT INTO indoor_readings (timestamp, temperature, humidity, pressure)
+        VALUES (:timestamp, :temperature, :humidity, :pressure)
+        """,
+        payload,
+    )
+    con.commit()
+
+
+def query_pressure_trend() -> str:
+    """Derive pressure trend from the last ~3 h of indoor readings.
+
+    Compares the average of the most-recent 30 min against the average of
+    the window 2–4 h ago.  Returns 'rising', 'falling', 'steady', or
+    'unknown' when there is not enough data yet.
+    """
+    con = _get_connection()
+    row = con.execute(
+        """
+        SELECT
+            AVG(CASE WHEN timestamp >= datetime('now', '-30 minutes')
+                     THEN pressure END)                              AS p_recent,
+            AVG(CASE WHEN timestamp BETWEEN datetime('now', '-4 hours')
+                                        AND datetime('now', '-2 hours')
+                     THEN pressure END)                              AS p_old
+        FROM  indoor_readings
+        WHERE timestamp >= datetime('now', '-4 hours')
+          AND pressure   IS NOT NULL
+        """
+    ).fetchone()
+    if row is None:
+        return "unknown"
+    p_recent, p_old = row["p_recent"], row["p_old"]
+    if p_recent is None or p_old is None:
+        return "unknown"
+    delta = p_recent - p_old
+    if delta > 0.5:
+        return "rising"
+    if delta < -0.5:
+        return "falling"
+    return "steady"
 
 
 def query_recent(n: int) -> list[dict]:

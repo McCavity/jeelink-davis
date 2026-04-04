@@ -71,9 +71,11 @@ jeelink_davis/
 
 web/
 ├── app.py            # FastAPI application, lifespan, all API endpoints
+├── bme280_reader.py  # daemon thread: polls GY-BME280 every 60 s → DB + in-memory cache
 ├── broadcaster.py    # fan-out to SSE clients; maintains merged latest-reading state
 ├── config.py         # loads config.toml
 ├── db.py             # SQLite storage layer (WAL mode, per-thread connections)
+│                     #   tables: readings (outdoor), indoor_readings (BME280)
 ├── reader.py         # daemon thread: drives DavisStation → broadcaster + DB
 └── static/
     ├── index.html    # single-page dashboard (Chart.js, Tailwind CDN, vanilla JS)
@@ -90,10 +92,14 @@ tests/
 └── test_detect.py    # detect unit tests
 ```
 
-**Data flow**:
+**Data flow (outdoor)**:
 `JeeLinkConnection.read_lines()` → `DavisStation.readings()` → `WeatherReading`
 → `station_reader_thread` → `db.insert_reading()` + `broadcaster.broadcast()`
 → SSE clients (`/api/stream`) + `/api/latest` snapshot
+
+**Data flow (indoor/BME280)**:
+`bme280_reader_thread` (60 s poll) → `db.insert_indoor_reading()` + in-memory cache
+→ `/api/indoor` snapshot (polled by frontend every 60 s)
 
 ## Web API endpoints
 
@@ -108,6 +114,7 @@ tests/
 | `GET /api/history/range?start=YYYY-MM-DD&end=YYYY-MM-DD` | Auto-bucketed history (5 min / 1 h / 6 h / 1 day depending on range width) |
 | `GET /api/history/recent?n=50` | Last n raw readings (used to seed the wind chart) |
 | `GET /api/history/today` | Today's min/max stats for card display |
+| `GET /api/indoor` | Latest BME280 reading (pressure, indoor temp/humidity) + pressure trend |
 | `GET /api/stats/daily\|monthly\|yearly` | Aggregated stats by period |
 
 ## Protocol (firmware 0.8e)
@@ -136,7 +143,7 @@ tests/
 | RainSecs | seconds | Inter-tip interval; sentinel value < 0 = no rain |
 | Solar | W/m² | |
 | RSSI | dBm | Typically −60 to −75 with good placement |
-| Pressure | hPa | Not yet received (external barometer not fitted) |
+| Pressure | hPa | From GY-BME280 indoor sensor (Davis ISS has no barometer) |
 
 **Rain calculations**:
 - 0.2 mm per tip (EU/metric bucket)
@@ -154,6 +161,8 @@ tests/
 - **Deploy**: copy changed files to `/opt/jeelink-davis/`, then `sudo systemctl restart davis-weather` for Python changes; static files take effect immediately on browser refresh
 - **Screenshots**: `chromium --headless=new --screenshot=/tmp/shot.png --window-size=1400,900 https://wetter.halfpap.io/` then read `/tmp/shot.png`
 
-## Planned / upcoming
+## Indoor sensor (GY-BME280)
 
-- **Indoor sensor**: GY-BME280 (pressure, indoor temperature, indoor humidity) via Raspberry Pi I²C/GPIO — hardware ordered, expected over the weekend
+Connected to Raspberry Pi I²C bus 1 at address **0x76**. Polled every 60 s by `web/bme280_reader.py` daemon thread. Readings stored in `indoor_readings` table (SQLite). Timestamps stored as `YYYY-MM-DD HH:MM:SS` UTC so SQLite `datetime()` comparisons work.
+
+**Pressure trend** (`/api/indoor` → `pressure_trend`): compares avg pressure of the last 30 min vs 2–4 h ago. Threshold ±0.5 hPa → `rising` / `falling` / `steady` / `unknown` (insufficient history).

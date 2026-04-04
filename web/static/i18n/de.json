@@ -22,7 +22,14 @@
     "rain_rate_label":  "Rate",
     "rain_last_tip":    "Letzte Kipp.",
     "rain_ago":         "s her",
-    "gust_max_today":   "Max heute"
+    "gust_max_today":   "Max heute",
+    "pressure":         "Luftdruck",
+    "pressure_trend_rising":  "Steigend",
+    "pressure_trend_falling": "Fallend",
+    "pressure_trend_steady":  "Stabil",
+    "pressure_trend_unknown": "Noch keine Trenddaten",
+    "indoor_temp":      "Innen Temp.",
+    "indoor_humidity":  "Innen Feuchte"
   },
   "solar": {
     "moon":    "Mond",

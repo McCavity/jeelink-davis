@@ -30,6 +30,7 @@ from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .broadcaster import broadcaster
+from .bme280_reader import bme280_reader_thread
 from .config import load_config
 from .reader import station_reader_thread
 
@@ -59,6 +60,8 @@ async def lifespan(app: FastAPI):
         name="davis-reader",
     )
     t.start()
+    bme_t = threading.Thread(target=bme280_reader_thread, daemon=True, name="bme280-reader")
+    bme_t.start()
     yield
 
 
@@ -193,6 +196,19 @@ async def history_today():
     if not result:
         return Response(status_code=204)
     return result
+
+
+@app.get("/api/indoor")
+async def indoor():
+    """Returns the latest BME280 indoor reading plus a pressure trend, or 204."""
+    from .bme280_reader import get_latest
+    from . import db as weather_db
+    data = get_latest()
+    if data is None:
+        return Response(status_code=204)
+    loop = asyncio.get_running_loop()
+    trend = await loop.run_in_executor(None, weather_db.query_pressure_trend)
+    return {**data, "pressure_trend": trend}
 
 
 @app.get("/api/stats/daily")

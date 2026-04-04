@@ -159,6 +159,18 @@
         <span id="battery-val">—</span>
       </div>
 
+      <!-- RSSI badge -->
+      <div id="rssi-badge" class="badge bg-slate-800 text-slate-400" title="Signal strength (RSSI)">
+        <svg class="w-3.5 h-3" viewBox="0 0 16 12" fill="currentColor">
+          <rect x="0"  y="8" width="3" height="4" rx="0.5"/>
+          <rect x="4.5" y="5" width="3" height="7" rx="0.5"/>
+          <rect x="9"  y="2" width="3" height="10" rx="0.5"/>
+          <rect x="13.5" y="0" width="2.5" height="12" rx="0.5" opacity="0.3"/>
+        </svg>
+        <span id="rssi-header-val">—</span>
+        <span class="text-slate-600 text-xs">dBm</span>
+      </div>
+
     </div>
   </div>
 
@@ -172,7 +184,7 @@
   <div id="section-live">
 
   <!-- ── Reading cards ────────────────────────────────────────────────── -->
-  <div class="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-4">
+  <div class="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
 
     <!-- Temperature -->
     <div class="card col-span-2 md:col-span-1">
@@ -247,13 +259,30 @@
       </div>
     </div>
 
-    <!-- Signal -->
+    <!-- Pressure -->
     <div class="card">
-      <div data-i18n="cards.signal" class="card-label">Signal</div>
-      <div id="rssi-card-val" class="value-medium text-rose-400">—</div>
-      <div class="text-slate-500 text-sm mt-1">dBm</div>
+      <div data-i18n="cards.pressure" class="card-label">Pressure</div>
+      <div class="flex items-baseline gap-2">
+        <div id="pressure-val" class="value-medium text-violet-400">—</div>
+        <span id="pressure-trend" class="text-xl font-bold text-slate-700" title="">—</span>
+      </div>
+      <div class="text-slate-500 text-sm mt-1">hPa</div>
+    </div>
+
+    <!-- Indoor Temperature -->
+    <div class="card">
+      <div data-i18n="cards.indoor_temp" class="card-label">Indoor Temp</div>
+      <div id="indoor-temp-val" class="value-medium text-orange-300">—</div>
+      <div class="text-slate-500 text-sm mt-1">°C</div>
+    </div>
+
+    <!-- Indoor Humidity -->
+    <div class="card">
+      <div data-i18n="cards.indoor_humidity" class="card-label">Indoor Humidity</div>
+      <div id="indoor-humidity-val" class="value-medium text-cyan-300">—</div>
+      <div class="text-slate-500 text-sm mt-1">%</div>
       <div class="bar-track mt-3">
-        <div id="rssi-bar" class="bar-fill bg-rose-500" style="width:0%"></div>
+        <div id="indoor-humidity-bar" class="bar-fill bg-cyan-700" style="width:0%"></div>
       </div>
     </div>
 
@@ -754,10 +783,15 @@ function renderState() {
   const s = state;
   if (s.timestamp) setText('last-update', timeOf(s.timestamp));
 
-  // RSSI (card only)
-  setText('rssi-card-val', fmt(s.rssi, 0));
-  setColorClass('rssi-card-val', rssiColor(s.rssi));
-  document.getElementById('rssi-bar').style.width = rssiPct(s.rssi) + '%';
+  // RSSI (header badge)
+  if (s.rssi != null) {
+    setText('rssi-header-val', fmt(s.rssi, 0));
+    const rssiBadge = document.getElementById('rssi-badge');
+    if (rssiBadge) {
+      const color = s.rssi > -65 ? 'emerald' : s.rssi > -75 ? 'amber' : 'rose';
+      rssiBadge.className = `badge bg-${color}-900 text-${color}-300`;
+    }
+  }
 
   // Battery
   if (s.battery_ok !== undefined) {
@@ -1250,6 +1284,37 @@ function renderHistStats() {
   ].join('');
 }
 
+// ── Indoor sensor (BME280) ────────────────────────────────────────────────
+const TREND_ARROWS = { rising: '↗', falling: '↘', steady: '→', unknown: '—' };
+const TREND_COLORS = {
+  rising:  'text-emerald-400',
+  falling: 'text-rose-400',
+  steady:  'text-slate-400',
+  unknown: 'text-slate-700',
+};
+
+async function loadIndoor() {
+  try {
+    const res = await fetch('/api/indoor');
+    if (!res.ok) return;
+    const d = await res.json();
+    if (d.pressure != null) setText('pressure-val', fmt(d.pressure, 1));
+    const trendEl = document.getElementById('pressure-trend');
+    if (trendEl && d.pressure_trend != null) {
+      const key = d.pressure_trend;
+      trendEl.textContent = TREND_ARROWS[key] ?? '—';
+      trendEl.className   = `text-xl font-bold ${TREND_COLORS[key] ?? 'text-slate-700'}`;
+      trendEl.title       = tr('cards.pressure_trend_' + key, key);
+    }
+    if (d.temperature != null) setText('indoor-temp-val', fmt(d.temperature, 1));
+    if (d.humidity    != null) {
+      setText('indoor-humidity-val', fmt(d.humidity, 0));
+      const bar = document.getElementById('indoor-humidity-bar');
+      if (bar) bar.style.width = Math.min(100, d.humidity) + '%';
+    }
+  } catch (_) {}
+}
+
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 async function loadLatest() {
   try {
@@ -1282,6 +1347,7 @@ function connectSSE() {
   loadDayTemp();               // seed 24-h temp chart (today + yesterday)
   loadSolar();                 // also populates sun elevation curve
   loadForecast();
+  loadIndoor();                // BME280 pressure + indoor temp/humidity
   loadHistory();               // seed history section (default: 1D)
   connectSSE();
 })();
@@ -1298,6 +1364,7 @@ setTimeout(() => {
 setInterval(loadForecast,    30 * 60 * 1000);
 setInterval(loadTodayStats,  60 * 1000);
 setInterval(loadDayTemp,      5 * 60 * 1000);
+setInterval(loadIndoor,      60 * 1000);
 </script>
 </body>
 </html>

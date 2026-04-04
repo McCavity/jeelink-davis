@@ -22,7 +22,14 @@
     "rain_rate_label":  "Rate",
     "rain_last_tip":    "Last tip",
     "rain_ago":         "s ago",
-    "gust_max_today":   "Max today"
+    "gust_max_today":   "Max today",
+    "pressure":         "Pressure",
+    "pressure_trend_rising":  "Rising",
+    "pressure_trend_falling": "Falling",
+    "pressure_trend_steady":  "Steady",
+    "pressure_trend_unknown": "No trend data yet",
+    "indoor_temp":      "Indoor Temp",
+    "indoor_humidity":  "Indoor Humidity"
   },
   "solar": {
     "moon":    "Moon",
