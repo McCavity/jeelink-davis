@@ -88,7 +88,12 @@
     "stats_temp":   "Temp Min / Mittel / Max",
     "stats_gust":   "Max-Böe",
     "stats_rain":   "Gesamtniederschlag",
-    "stats_hum":    "Mittl. Feuchte"
+    "stats_hum":      "Mittl. Feuchte",
+    "pressure":       "Luftdruck",
+    "pressure_min":   "Min hPa",
+    "pressure_avg":   "Mittel hPa",
+    "pressure_max":   "Max hPa",
+    "stats_pressure": "Luftdruck Min / Mittel / Max"
   },
   "wmo": {
     "0":  "Klarer Himmel",

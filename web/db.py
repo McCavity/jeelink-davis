@@ -300,6 +300,60 @@ def query_range_bucketed(start: str, end: str) -> dict:
     return {"bucket_minutes": bucket_minutes, "data": [dict(r) for r in rows]}
 
 
+def query_indoor_range_bucketed(start: str, end: str) -> dict:
+    """
+    Return bucketed average pressure from indoor_readings for a date range.
+
+    Uses the same auto-bucket sizes as query_range_bucketed so the labels
+    align when displayed alongside outdoor data.
+    """
+    for d in (start, end):
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", d):
+            raise ValueError(f"Invalid date: {d!r}")
+
+    days = (date.fromisoformat(end) - date.fromisoformat(start)).days + 1
+
+    if days <= 1:
+        bucket_minutes = 5
+        bucket_sql = """
+            strftime('%Y-%m-%d %H:', timestamp, 'localtime') ||
+            printf('%02d',
+                (CAST(strftime('%M', timestamp, 'localtime') AS INTEGER) / 5) * 5)
+        """
+    elif days <= 7:
+        bucket_minutes = 60
+        bucket_sql = "strftime('%Y-%m-%d %H:00', timestamp, 'localtime')"
+    elif days <= 31:
+        bucket_minutes = 360
+        bucket_sql = """
+            strftime('%Y-%m-%d ', timestamp, 'localtime') ||
+            printf('%02d:00',
+                (CAST(strftime('%H', timestamp, 'localtime') AS INTEGER) / 6) * 6)
+        """
+    else:
+        bucket_minutes = 1440
+        bucket_sql = "strftime('%Y-%m-%d', timestamp, 'localtime')"
+
+    con = _get_connection()
+    rows = con.execute(
+        f"""
+        SELECT
+            ({bucket_sql})              AS bucket,
+            ROUND(AVG(pressure), 1)     AS pressure_avg,
+            ROUND(MIN(pressure), 1)     AS pressure_min,
+            ROUND(MAX(pressure), 1)     AS pressure_max
+        FROM indoor_readings
+        WHERE date(timestamp, 'localtime') BETWEEN ? AND ?
+          AND pressure IS NOT NULL
+        GROUP BY bucket
+        ORDER BY bucket
+        """,
+        (start, end),
+    ).fetchall()
+
+    return {"bucket_minutes": bucket_minutes, "data": [dict(r) for r in rows]}
+
+
 def query_stats(period: str) -> list[dict]:
     """
     Return aggregated stats grouped by period.

@@ -187,6 +187,19 @@ async def history_recent(n: int = 50):
     return await loop.run_in_executor(None, lambda: weather_db.query_recent(n))
 
 
+@app.get("/api/history/indoor_range")
+async def history_indoor_range(start: str, end: str):
+    """Returns bucketed average pressure from the BME280 for a date range."""
+    from . import db as weather_db
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(
+            None, lambda: weather_db.query_indoor_range_bucketed(start, end)
+        )
+    except ValueError:
+        return Response(status_code=400)
+
+
 @app.get("/api/history/today")
 async def history_today():
     """Today's min/max stats for card display."""

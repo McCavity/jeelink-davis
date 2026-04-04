@@ -88,7 +88,12 @@
     "stats_temp":   "Temp min / avg / max",
     "stats_gust":   "Max gust",
     "stats_rain":   "Total rain",
-    "stats_hum":    "Avg humidity"
+    "stats_hum":      "Avg humidity",
+    "pressure":       "Pressure",
+    "pressure_min":   "Min hPa",
+    "pressure_avg":   "Avg hPa",
+    "pressure_max":   "Max hPa",
+    "stats_pressure": "Pressure min / avg / max"
   },
   "wmo": {
     "0":  "Clear sky",

@@ -393,6 +393,7 @@
         <button class="hist-tab"        data-metric="rain"     onclick="setHistMetric('rain')"     data-i18n="history.rain">Rain</button>
         <button class="hist-tab"        data-metric="wind"     onclick="setHistMetric('wind')"     data-i18n="history.wind">Wind</button>
         <button class="hist-tab"        data-metric="humidity" onclick="setHistMetric('humidity')" data-i18n="history.humidity">Humidity</button>
+        <button class="hist-tab"        data-metric="pressure" onclick="setHistMetric('pressure')" data-i18n="history.pressure">Pressure</button>
       </div>
 
       <!-- Chart -->
@@ -1120,8 +1121,9 @@ function setTab(tab) {
 }
 
 // ── History section ────────────────────────────────────────────────────────
-let histChart  = null;
-let histData   = null;
+let histChart       = null;
+let histData        = null;   // outdoor: temp / rain / wind / humidity
+let histIndoorData  = null;   // indoor: pressure (BME280)
 let histPeriod = '1D';
 let histMetric = 'temp';
 let histStart  = null;
@@ -1214,10 +1216,15 @@ async function loadHistory() {
   updateHistNavButtons();
   document.getElementById('hist-loading').style.display = 'flex';
   try {
-    const res = await fetch(`/api/history/range?start=${start}&end=${end}`);
-    if (!res.ok) return;
-    histData = await res.json();
-    const hasData = histData?.data?.length > 0;
+    const [res, indoorRes] = await Promise.all([
+      fetch(`/api/history/range?start=${start}&end=${end}`),
+      fetch(`/api/history/indoor_range?start=${start}&end=${end}`),
+    ]);
+    if (res.ok)       histData       = await res.json();
+    if (indoorRes.ok) histIndoorData = await indoorRes.json();
+
+    const activeData = histMetric === 'pressure' ? histIndoorData : histData;
+    const hasData    = activeData?.data?.length > 0;
     document.getElementById('hist-nodata').style.display = hasData ? 'none' : 'flex';
     if (!hasData) { document.getElementById('hist-stats').innerHTML = ''; }
     renderHistChart();
@@ -1229,18 +1236,44 @@ async function loadHistory() {
 }
 
 function renderHistChart() {
-  if (!histData?.data?.length) {
+  const srcData = histMetric === 'pressure' ? histIndoorData : histData;
+  if (!srcData?.data?.length) {
     histChart?.destroy(); histChart = null;
     return;
   }
 
-  const bm     = histData.bucket_minutes;
-  const labels = histData.data.map(r => histFormatLabel(r.bucket, bm));
-  const d      = histData.data;
+  const bm     = srcData.bucket_minutes;
+  const labels = srcData.data.map(r => histFormatLabel(r.bucket, bm));
+  const d      = srcData.data;
   const isBar  = histMetric === 'rain';
 
   let datasets;
-  if (histMetric === 'temp') {
+  if (histMetric === 'pressure') {
+    datasets = [
+      {
+        label: tr('history.pressure_min', 'Min hPa'),
+        data: d.map(r => r.pressure_min),
+        borderColor: 'rgba(167,139,250,0.5)',
+        backgroundColor: 'rgba(167,139,250,0.08)',
+        borderWidth: 1, pointRadius: 0,
+        fill: '+1', tension: 0.3,
+      },
+      {
+        label: tr('history.pressure_max', 'Max hPa'),
+        data: d.map(r => r.pressure_max),
+        borderColor: 'rgba(167,139,250,0.5)',
+        borderWidth: 1, pointRadius: 0,
+        fill: false, tension: 0.3,
+      },
+      {
+        label: tr('history.pressure_avg', 'Avg hPa'),
+        data: d.map(r => r.pressure_avg),
+        borderColor: 'rgb(167,139,250)',
+        borderWidth: 2, pointRadius: 0,
+        fill: false, tension: 0.3,
+      },
+    ];
+  } else if (histMetric === 'temp') {
     datasets = [
       // Min line + fill to max → temperature band
       {
@@ -1320,9 +1353,10 @@ function renderHistChart() {
         x: { ticks: { maxTicksLimit: 10, maxRotation: 0 }, grid: { color: 'rgb(30,41,59)' } },
         y: {
           grid: { color: 'rgb(30,41,59)' },
-          ...(histMetric === 'temp'     ? { suggestedMin: -20, suggestedMax: 50 } : {}),
-          ...(histMetric === 'humidity' ? { min: 0, max: 100 }                    : {}),
-          ...(histMetric === 'rain'     ? { min: 0 }                              : {}),
+          ...(histMetric === 'temp'     ? { suggestedMin: -20, suggestedMax: 50 }   : {}),
+          ...(histMetric === 'humidity' ? { min: 0, max: 100 }                      : {}),
+          ...(histMetric === 'rain'     ? { min: 0 }                                : {}),
+          ...(histMetric === 'pressure' ? { suggestedMin: 980, suggestedMax: 1040 } : {}),
         },
       },
     },
@@ -1330,6 +1364,26 @@ function renderHistChart() {
 }
 
 function renderHistStats() {
+  const el = (label, val) => `
+    <div class="bg-slate-900 rounded-lg p-3 text-center">
+      <div class="text-slate-600 text-xs mb-1">${label}</div>
+      <div class="mono text-slate-200 text-sm font-semibold">${val}</div>
+    </div>`;
+
+  if (histMetric === 'pressure') {
+    const d = histIndoorData?.data;
+    if (!d?.length) return;
+    const vals = key => d.map(r => r[key]).filter(v => v != null);
+    const avg  = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+    const allP = vals('pressure_avg');
+    const pStr = allP.length
+      ? `${Math.min(...d.map(r => r.pressure_min).filter(v => v != null)).toFixed(1)} / ${avg(allP).toFixed(1)} / ${Math.max(...d.map(r => r.pressure_max).filter(v => v != null)).toFixed(1)} hPa`
+      : '—';
+    document.getElementById('hist-stats').innerHTML =
+      el(tr('history.stats_pressure', 'Pressure min / avg / max'), pStr);
+    return;
+  }
+
   if (!histData?.data?.length) return;
   const d = histData.data;
 
@@ -1346,12 +1400,6 @@ function renderHistStats() {
   const tempStr = allMin.length
     ? `${Math.min(...allMin).toFixed(1)} / ${avg(allAvg).toFixed(1)} / ${Math.max(...allMax).toFixed(1)} °C`
     : '—';
-
-  const el = (label, val) => `
-    <div class="bg-slate-900 rounded-lg p-3 text-center">
-      <div class="text-slate-600 text-xs mb-1">${label}</div>
-      <div class="mono text-slate-200 text-sm font-semibold">${val}</div>
-    </div>`;
 
   document.getElementById('hist-stats').innerHTML = [
     el(tr('history.stats_temp',  'Temp min / avg / max'), tempStr),
@@ -1425,7 +1473,7 @@ function connectSSE() {
   loadSolar();                 // also populates sun elevation curve
   loadForecast();
   loadIndoor();                // BME280 pressure + indoor temp/humidity
-  loadHistory();               // seed history section (default: 1D)
+  setHistPeriod('1D');         // seed history section; sets dates then calls loadHistory()
   connectSSE();
 })();
 
