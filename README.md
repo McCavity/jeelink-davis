@@ -19,14 +19,14 @@ The bundled web dashboard (`web/`) is a single-page app served via FastAPI:
 
 ### Indoor sensor (GY-BME280)
 
-A GY-BME280 connected to the Raspberry Pi I²C bus (address `0x76`) provides barometric pressure, indoor temperature, and indoor humidity. It is polled every 60 s by a background thread and stored in a separate `indoor_readings` SQLite table. Pressure trend is derived from a 3-hour rolling comparison (±0.5 hPa threshold).
+A GY-BME280 connected to the Raspberry Pi I²C bus provides barometric pressure, indoor temperature, and indoor humidity. The I²C address and bus number are configured in `config.toml` (defaults: bus `1`, address `0x76`). It is polled every 60 s by a background thread and stored in a separate `indoor_readings` SQLite table. Pressure trend compares the average of the last 30 min against the average of the 2–4 h ago window — effectively a 3-hour rolling comparison (±0.5 hPa threshold → rising / falling / steady).
 
 ## Requirements
 
 - Python 3.11+
 - JeeLink USB receiver with Davis firmware 0.8e
 - Davis Vantage Pro 2 ISS (outdoor sensor unit)
-- *(optional)* GY-BME280 on I²C bus 1 at address `0x76` for pressure and indoor climate
+- *(optional)* GY-BME280 on I²C (address and bus configurable in `config.toml`) for pressure and indoor climate
 
 ## Installation
 
@@ -38,7 +38,36 @@ pip install -e ".[web]"       # library + web dashboard dependencies (includes s
 pip install -e ".[dev]"       # library + test dependencies
 ```
 
-Copy `config.toml` and adjust for your location before running the web service.
+## Configuration
+
+`config.toml` is already in the project root — edit it to match your location and hardware before running the web service:
+
+```toml
+[station]
+name      = "Davis Vantage Pro 2"
+latitude  = 50.174533   # decimal degrees, positive = North
+longitude = 8.719422    # decimal degrees, positive = East
+elevation = 167         # metres above sea level
+timezone  = "Europe/Berlin"
+
+[storage]
+db_path = "data/readings.db"   # relative to project root, or absolute path
+
+[sensors]
+bme280_bus     = 1     # I²C bus number (1 on all modern Raspberry Pi models)
+bme280_address = 0x76  # I²C address: 0x76 (SDO low) or 0x77 (SDO high)
+```
+
+| Key | Description |
+|---|---|
+| `station.latitude` / `longitude` | Used for the Open-Meteo forecast and sun elevation/times. |
+| `station.elevation` | Metres above sea level — passed to Open-Meteo. |
+| `station.timezone` | IANA timezone name, e.g. `Europe/Berlin`. Controls daily stats boundaries and chart x-axis. |
+| `storage.db_path` | SQLite database path. Relative paths are resolved from the project root. |
+| `sensors.bme280_address` | I²C address of the GY-BME280. Change to `0x77` if the SDO pin on your module is pulled high. |
+| `sensors.bme280_bus` | I²C bus number. Almost always `1` on Raspberry Pi. |
+
+The **JeeLink serial port** is auto-detected by USB VID/PID. Override it with the `DAVIS_PORT` environment variable if needed (e.g. when multiple USB serial devices are present). The **BME280** is optional — if `smbus2`/`RPi.bme280` are not installed or the sensor is unreachable, the indoor readings are simply disabled and the rest of the app is unaffected.
 
 ## Running the dashboard
 
@@ -78,11 +107,11 @@ with DavisStation(port="/dev/ttyUSB0") as station:
 
 ```bash
 # Detect JeeLink and report its port
-python tools/detect.py
+.venv/bin/python tools/detect.py
 
 # Raw listener — prints everything from the JeeLink for 60 seconds
-python tools/sniff.py
-python tools/sniff.py --duration 120
+.venv/bin/python tools/sniff.py
+.venv/bin/python tools/sniff.py --duration 120
 ```
 
 ## Running tests
@@ -101,7 +130,7 @@ Tests do not require hardware — the serial port is fully mocked.
 | Field | Sensor | Notes |
 |---|---|---|
 | `temperature` | Temperature | °C |
-| `pressure` | Barometric pressure | hPa — from GY-BME280 indoor sensor (Davis ISS has no barometer) |
+| `pressure` | Barometric pressure | hPa — always `None` for the Davis ISS (it has no barometer); dashboard pressure comes from the GY-BME280 via `/api/indoor` |
 | `humidity` | Relative humidity | % |
 | `wind_speed` | Wind speed | m/s |
 | `wind_direction` | Wind direction | degrees 0–359 |

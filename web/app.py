@@ -60,7 +60,15 @@ async def lifespan(app: FastAPI):
         name="davis-reader",
     )
     t.start()
-    bme_t = threading.Thread(target=bme280_reader_thread, daemon=True, name="bme280-reader")
+    sensor_cfg = cfg.get("sensors", {})
+    bme_bus     = sensor_cfg.get("bme280_bus", 1)
+    bme_address = sensor_cfg.get("bme280_address", 0x76)
+    bme_t = threading.Thread(
+        target=bme280_reader_thread,
+        args=(bme_address, bme_bus),
+        daemon=True,
+        name="bme280-reader",
+    )
     bme_t.start()
     yield
 

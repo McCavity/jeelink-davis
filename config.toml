@@ -7,3 +7,7 @@ timezone  = "Europe/Berlin"
 
 [storage]
 db_path = "data/readings.db"   # relative to project root, or absolute path
+
+[sensors]
+bme280_bus     = 1     # I²C bus number (1 on all modern Raspberry Pi models)
+bme280_address = 0x76  # I²C address: 0x76 (SDO low) or 0x77 (SDO high)
