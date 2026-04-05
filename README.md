@@ -71,12 +71,40 @@ The **JeeLink serial port** is auto-detected by USB VID/PID. Override it with th
 
 ## Running the dashboard
 
-```bash
-# Development
-DAVIS_PORT=/dev/ttyUSB0 .venv/bin/uvicorn web.app:app --host 0.0.0.0 --port 8000
-# (omit DAVIS_PORT to auto-detect the JeeLink)
+### Development
 
-# Production (systemd service on dwsapp01)
+```bash
+.venv/bin/uvicorn web.app:app --host 0.0.0.0 --port 8000
+# Override serial port if auto-detection picks the wrong device:
+DAVIS_PORT=/dev/ttyUSB0 .venv/bin/uvicorn web.app:app --host 0.0.0.0 --port 8000
+```
+
+### Production deployment
+
+The repo includes two helper scripts for deploying to a Linux host (e.g. a Raspberry Pi). Both must be run as root from the repository root on the target machine.
+
+**First-time setup** — creates the `davis` system user, adds it to the `dialout` (JeeLink serial) and `i2c` (BME280) groups, copies the project to `/opt/jeelink-davis/`, installs dependencies in a venv, and installs + enables the `davis-weather` systemd service:
+
+```bash
+sudo ./deploy.sh
+```
+
+After the script finishes, edit `/opt/jeelink-davis/config.toml` to set your location, then restart the service:
+
+```bash
+sudo systemctl restart davis-weather
+```
+
+**Updating** — after pulling new commits, sync changed files and restart the service. `config.toml` and the SQLite database are never overwritten:
+
+```bash
+git pull
+sudo ./update.sh
+```
+
+**Service management:**
+
+```bash
 sudo systemctl status davis-weather
 sudo systemctl restart davis-weather
 sudo journalctl -u davis-weather -f
