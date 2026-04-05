@@ -166,3 +166,19 @@ tests/
 Connected to Raspberry Pi I²C bus 1 at address **0x76**. Polled every 60 s by `web/bme280_reader.py` daemon thread. Readings stored in `indoor_readings` table (SQLite). Timestamps stored as `YYYY-MM-DD HH:MM:SS` UTC so SQLite `datetime()` comparisons work.
 
 **Pressure trend** (`/api/indoor` → `pressure_trend`): compares avg pressure of the last 30 min vs 2–4 h ago. Threshold ±0.5 hPa → `rising` / `falling` / `steady` / `unknown` (insufficient history).
+
+## Organisation Context
+
+This repository is part of Henning Halfpap's personal GitHub collection, located at
+`/Users/hhalfpap/git/projects/own` on the development machine.
+
+- **Org index**: `/Users/hhalfpap/git/projects/own/org-index.json` — machine-readable
+  metadata for all repos (last commit, CLAUDE.md presence, file count, etc.)
+- **Org instructions**: `/Users/hhalfpap/git/projects/own/CLAUDE.md` — guidance for
+  cross-repo maintenance tasks (checking sync status, stale repos, etc.)
+
+For project-specific work, operate within this directory. For questions spanning
+multiple repos, consult the org index first.
+
+**Tooling rule**: Skills, plugins, and MCP servers are always installed at project level
+(`.claude/settings.json` in this directory), never at user/global level.
