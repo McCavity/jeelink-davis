@@ -17,6 +17,8 @@ The bundled web dashboard (`web/`) is a single-page app served via FastAPI:
 - **Sun & moon strip** — dawn, sunrise, noon, sunset, dusk, moon phase
 - **EN / DE** — language toggle, persisted in localStorage
 
+![Dashboard screenshot](docs/dashboard.png)
+
 ### Indoor sensor (GY-BME280)
 
 A GY-BME280 connected to the Raspberry Pi I²C bus provides barometric pressure, indoor temperature, and indoor humidity. The I²C address and bus number are configured in `config.toml` (defaults: bus `1`, address `0x76`). It is polled every 60 s by a background thread and stored in a separate `indoor_readings` SQLite table. Pressure trend compares the average of the last 30 min against the average of the 2–4 h ago window — effectively a 3-hour rolling comparison (±0.5 hPa threshold → rising / falling / steady).
