@@ -467,7 +467,7 @@ function tr(path, fallback) {
 
 async function setLang(lang) {
   try {
-    const res = await fetch(`/static/i18n/${lang}.json`);
+    const res = await fetch(`/static/i18n/${lang}.json`, { cache: 'no-cache' });
     if (!res.ok) return;
     t = await res.json();
     currentLang = lang;
