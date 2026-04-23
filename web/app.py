@@ -74,7 +74,6 @@ async def lifespan(app: FastAPI):
 
     idb_cfg = cfg.get("influxdb")
     if idb_cfg:
-        import os
         token = os.environ.get("INFLUXDB_TOKEN") or idb_cfg.get("token", "")
         if token:
             idb_t = threading.Thread(
