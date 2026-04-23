@@ -457,8 +457,8 @@
         "overrides": [
           {
             "matcher": {
-              "id": "byName",
-              "options": "temperature"
+              "id": "byRegexp",
+              "options": ".*temperature.*"
             },
             "properties": [
               {
@@ -476,8 +476,8 @@
           },
           {
             "matcher": {
-              "id": "byName",
-              "options": "humidity"
+              "id": "byRegexp",
+              "options": ".*humidity.*"
             },
             "properties": [
               {
@@ -606,8 +606,8 @@
         "overrides": [
           {
             "matcher": {
-              "id": "byName",
-              "options": "wind_speed"
+              "id": "byRegexp",
+              "options": ".*wind_speed.*"
             },
             "properties": [
               {
@@ -629,8 +629,8 @@
           },
           {
             "matcher": {
-              "id": "byName",
-              "options": "wind_gust"
+              "id": "byRegexp",
+              "options": ".*wind_gust.*"
             },
             "properties": [
               {
