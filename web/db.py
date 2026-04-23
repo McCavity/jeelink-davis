@@ -354,6 +354,43 @@ def query_indoor_range_bucketed(start: str, end: str) -> dict:
     return {"bucket_minutes": bucket_minutes, "data": [dict(r) for r in rows]}
 
 
+def query_rain_totals() -> dict:
+    """Return rain totals (mm) for the current week (Mon), month, and year."""
+    today = date.today()
+    week_start  = today - timedelta(days=today.weekday())  # ISO Monday
+    month_start = today.replace(day=1)
+    year_start  = today.replace(month=1, day=1)
+
+    con = _get_connection()
+
+    def rain_since(start: date) -> float:
+        row = con.execute(
+            """
+            SELECT COALESCE(SUM(daily_rain), 0.0) AS rain_mm
+            FROM (
+                SELECT CASE
+                           WHEN MAX(rain_tip_count) >= MIN(rain_tip_count)
+                           THEN ROUND((MAX(rain_tip_count) - MIN(rain_tip_count)) * 0.2, 1)
+                           ELSE 0
+                       END AS daily_rain
+                FROM   readings
+                WHERE  date(timestamp, 'localtime') >= ?
+                  AND  date(timestamp, 'localtime') <= ?
+                  AND  rain_tip_count IS NOT NULL
+                GROUP  BY date(timestamp, 'localtime')
+            )
+            """,
+            (start.isoformat(), today.isoformat()),
+        ).fetchone()
+        return round((row["rain_mm"] if row else 0.0) or 0.0, 1)
+
+    return {
+        "week_mm":  rain_since(week_start),
+        "month_mm": rain_since(month_start),
+        "year_mm":  rain_since(year_start),
+    }
+
+
 def query_stats(period: str) -> list[dict]:
     """
     Return aggregated stats grouped by period.

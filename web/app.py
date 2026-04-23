@@ -232,6 +232,14 @@ async def indoor():
     return {**data, "pressure_trend": trend}
 
 
+@app.get("/api/rain/totals")
+async def rain_totals():
+    """Return rain totals (mm) for the current week, month, and year."""
+    from . import db as weather_db
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, weather_db.query_rain_totals)
+
+
 @app.get("/api/stats/daily")
 async def stats_daily():
     from . import db as weather_db

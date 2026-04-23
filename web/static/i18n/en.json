@@ -24,7 +24,7 @@
     "rain_ago":         "s ago",
     "gust_max_today":   "Max today",
     "dew_point":        "Dew Point",
-    "wind_chill":       "Wind Chill",
+    "wind_chill":       "Feels Like",
     "temp_cycle_hint":  "Click to switch",
     "pressure":         "Pressure",
     "pressure_trend_rising":  "Rising",
@@ -32,7 +32,10 @@
     "pressure_trend_steady":  "Steady",
     "pressure_trend_unknown": "No trend data yet",
     "indoor_temp":      "Indoor Temp",
-    "indoor_humidity":  "Indoor Humidity"
+    "indoor_humidity":  "Indoor Humidity",
+    "rain_week":        "Week",
+    "rain_month":       "Month",
+    "rain_year":        "Year"
   },
   "solar": {
     "moon":    "Moon",
