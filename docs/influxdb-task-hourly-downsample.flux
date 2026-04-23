@@ -4,9 +4,10 @@
 //   "weather"        — Rohdaten (Quelle, geschrieben vom jeelink-davis Service)
 //   "weather_hourly" — Aggregate (Ziel, Retention: forever)
 //
-// Import: InfluxDB UI → Tasks → Create Task → Import → diesen Code einfügen.
-// Der Task läuft automatisch jede Stunde, 5 Minuten nach der vollen Stunde
-// (offset: 5m) damit alle Rohdaten der Stunde sicher angekommen sind.
+// Setup: InfluxDB UI → Tasks → Create Task → New Task → Script Editor
+// Name, every (1h) und offset (5m) in den UI-Feldern eintragen, dann diesen
+// Code einfügen und speichern. task.every wird bewusst nicht referenziert
+// (Kompatibilitätsproblem mit älteren InfluxDB-Versionen).
 
 option task = {
   name:   "davis_hourly_downsample",
@@ -20,7 +21,7 @@ option task = {
 // Die Feldnamen bleiben gleich → Grafana-Queries funktionieren für beide Buckets.
 
 from(bucket: "weather")
-  |> range(start: -task.every)
+  |> range(start: -1h)
   |> filter(fn: (r) => r._measurement == "outdoor")
   |> filter(fn: (r) =>
       r._field == "temperature"     or
@@ -32,16 +33,16 @@ from(bucket: "weather")
       r._field == "rssi"            or
       r._field == "pressure"
   )
-  |> aggregateWindow(every: task.every, fn: mean, createEmpty: false)
+  |> aggregateWindow(every: 1h, fn: mean, createEmpty: false)
   |> to(bucket: "weather_hourly")
 
 // ── Außen: Maximalwerte ───────────────────────────────────────────────────────
 // wind_gust: maximale Böe der Stunde
 
 from(bucket: "weather")
-  |> range(start: -task.every)
+  |> range(start: -1h)
   |> filter(fn: (r) => r._measurement == "outdoor" and r._field == "wind_gust")
-  |> aggregateWindow(every: task.every, fn: max, createEmpty: false)
+  |> aggregateWindow(every: 1h, fn: max, createEmpty: false)
   |> to(bucket: "weather_hourly")
 
 // ── Außen: Temperatur Min/Max ─────────────────────────────────────────────────
@@ -49,16 +50,16 @@ from(bucket: "weather")
 // damit in Grafana Tagesgang-Balken einfach darstellbar sind.
 
 from(bucket: "weather")
-  |> range(start: -task.every)
+  |> range(start: -1h)
   |> filter(fn: (r) => r._measurement == "outdoor" and r._field == "temperature")
-  |> aggregateWindow(every: task.every, fn: min, createEmpty: false)
+  |> aggregateWindow(every: 1h, fn: min, createEmpty: false)
   |> set(key: "_field", value: "temperature_min")
   |> to(bucket: "weather_hourly")
 
 from(bucket: "weather")
-  |> range(start: -task.every)
+  |> range(start: -1h)
   |> filter(fn: (r) => r._measurement == "outdoor" and r._field == "temperature")
-  |> aggregateWindow(every: task.every, fn: max, createEmpty: false)
+  |> aggregateWindow(every: 1h, fn: max, createEmpty: false)
   |> set(key: "_field", value: "temperature_max")
   |> to(bucket: "weather_hourly")
 
@@ -69,36 +70,36 @@ from(bucket: "weather")
 // für exakte Tages-/Monats-Summen (die den Wrap korrekt behandeln).
 
 from(bucket: "weather")
-  |> range(start: -task.every)
+  |> range(start: -1h)
   |> filter(fn: (r) => r._measurement == "outdoor" and r._field == "rain_tip_count")
-  |> aggregateWindow(every: task.every, fn: last, createEmpty: false)
+  |> aggregateWindow(every: 1h, fn: last, createEmpty: false)
   |> to(bucket: "weather_hourly")
 
 // ── Innen (BME280): Mittelwerte ───────────────────────────────────────────────
 
 from(bucket: "weather")
-  |> range(start: -task.every)
+  |> range(start: -1h)
   |> filter(fn: (r) => r._measurement == "indoor")
   |> filter(fn: (r) =>
       r._field == "temperature" or
       r._field == "humidity"    or
       r._field == "pressure"
   )
-  |> aggregateWindow(every: task.every, fn: mean, createEmpty: false)
+  |> aggregateWindow(every: 1h, fn: mean, createEmpty: false)
   |> to(bucket: "weather_hourly")
 
 // ── Innen: Luftdruck Min/Max ──────────────────────────────────────────────────
 
 from(bucket: "weather")
-  |> range(start: -task.every)
+  |> range(start: -1h)
   |> filter(fn: (r) => r._measurement == "indoor" and r._field == "pressure")
-  |> aggregateWindow(every: task.every, fn: min, createEmpty: false)
+  |> aggregateWindow(every: 1h, fn: min, createEmpty: false)
   |> set(key: "_field", value: "pressure_min")
   |> to(bucket: "weather_hourly")
 
 from(bucket: "weather")
-  |> range(start: -task.every)
+  |> range(start: -1h)
   |> filter(fn: (r) => r._measurement == "indoor" and r._field == "pressure")
-  |> aggregateWindow(every: task.every, fn: max, createEmpty: false)
+  |> aggregateWindow(every: 1h, fn: max, createEmpty: false)
   |> set(key: "_field", value: "pressure_max")
   |> to(bucket: "weather_hourly")
