@@ -100,9 +100,8 @@ def _build_point(payload: dict, measurement: str):
         station_id = payload.get("station_id")
         if station_id is not None:
             p = p.tag("station_id", str(station_id))
-        channel = payload.get("channel")
-        if channel is not None:
-            p = p.tag("channel", str(channel))
+        # channel bleibt Feld, nicht Tag — als Tag würde es pro Channel-Wert
+        # eine separate Zeitreihe erzeugen und Grafana-Queries fragmentieren
 
     fields = _OUTDOOR_FIELDS if measurement == "outdoor" else _INDOOR_FIELDS
     for field_name in fields:
