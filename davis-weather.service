@@ -10,6 +10,8 @@ WorkingDirectory=/opt/jeelink-davis
 Environment=PYTHONUNBUFFERED=1
 # Uncomment to override serial port auto-detection:
 # Environment=DAVIS_PORT=/dev/ttyUSB0
+# InfluxDB token (create file on the host, never commit the token):
+# EnvironmentFile=/etc/davis-weather.env  ← contains INFLUXDB_TOKEN=...
 ExecStart=/opt/jeelink-davis/.venv/bin/uvicorn web.app:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 3
 Restart=on-failure
 TimeoutStopSec=10
