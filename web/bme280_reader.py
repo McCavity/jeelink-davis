@@ -50,6 +50,7 @@ def bme280_reader_thread(address: int = 0x76, bus_num: int = 1) -> None:
         return
 
     from . import db as weather_db
+    from . import influxdb_writer
 
     global _latest
     while True:
@@ -67,6 +68,7 @@ def bme280_reader_thread(address: int = 0x76, bus_num: int = 1) -> None:
                 weather_db.insert_indoor_reading(reading)
             except Exception:
                 logger.exception("BME280 DB insert failed")
+            influxdb_writer.push(reading, "indoor")
         except Exception:
             logger.exception("BME280 read failed")
         time.sleep(60)

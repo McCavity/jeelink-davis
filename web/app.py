@@ -33,6 +33,7 @@ from .broadcaster import broadcaster
 from .bme280_reader import bme280_reader_thread
 from .config import load_config
 from .reader import station_reader_thread
+from . import influxdb_writer
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -70,6 +71,30 @@ async def lifespan(app: FastAPI):
         name="bme280-reader",
     )
     bme_t.start()
+
+    idb_cfg = cfg.get("influxdb")
+    if idb_cfg:
+        import os
+        token = os.environ.get("INFLUXDB_TOKEN") or idb_cfg.get("token", "")
+        if token:
+            idb_t = threading.Thread(
+                target=influxdb_writer.writer_thread,
+                kwargs={
+                    "url":    idb_cfg.get("url", "http://localhost:8086"),
+                    "token":  token,
+                    "org":    idb_cfg.get("org", ""),
+                    "bucket": idb_cfg.get("bucket", "weather"),
+                },
+                daemon=True,
+                name="influxdb-writer",
+            )
+            idb_t.start()
+        else:
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "InfluxDB config found but no token — set INFLUXDB_TOKEN env var"
+            )
+
     yield
 
 

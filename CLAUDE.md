@@ -101,6 +101,25 @@ tests/
 `bme280_reader_thread` (60 s poll) → `db.insert_indoor_reading()` + in-memory cache
 → `/api/indoor` snapshot (polled by frontend every 60 s)
 
+## InfluxDB Integration (Phase 3)
+
+InfluxDB v2 export is optional. Configure in `config.toml` under `[influxdb]` and set
+`INFLUXDB_TOKEN` env var (or add `token =` to the section).
+
+**Measurements written:**
+- `outdoor` — all Davis ISS fields; tags: `station_id`, `channel`
+- `indoor`  — BME280 fields: `temperature`, `humidity`, `pressure`
+
+**Backfill existing data:**
+```bash
+INFLUXDB_TOKEN=<token> .venv/bin/python tools/backfill_influxdb.py
+INFLUXDB_TOKEN=<token> .venv/bin/python tools/backfill_influxdb.py --since 2026-01-01
+```
+
+**Grafana Dashboard:** import `docs/grafana-davis-dashboard.json` via
+Dashboards → Import. Select the InfluxDB datasource when prompted.
+Bucket must exist in InfluxDB: `weather` (Org: Smart Home).
+
 ## Web API endpoints
 
 | Endpoint | Description |
