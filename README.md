@@ -78,15 +78,15 @@ pip install -e ".[dev]"       # library + test dependencies
 
 ## Configuration
 
-`config.toml` is already in the project root — edit it to match your location and hardware before running the web service:
+A vanilla `config.toml.example` is already in the project root — copy it to `config.toml` and edit that copy to match your location and hardware before running the web service. Note that both the `[influxdb]` and `[mqtt]` sections are optional. If you'd like to use either of them or both just uncomment what you need and edit the settings according to your environment:
 
 ```toml
 [station]
 name      = "Davis Vantage Pro 2"
-latitude  = 50.174533   # decimal degrees, positive = North
-longitude = 8.719422    # decimal degrees, positive = East
-elevation = 167         # metres above sea level
-timezone  = "Europe/Berlin"
+latitude  = 51.500000   # decimal degrees, positive = North
+longitude = 0.000000    # decimal degrees, positive = East
+elevation = 50          # metres above sea level
+timezone  = "Europe/London"
 
 [storage]
 db_path = "data/readings.db"   # relative to project root, or absolute path
@@ -94,6 +94,22 @@ db_path = "data/readings.db"   # relative to project root, or absolute path
 [sensors]
 bme280_bus     = 1     # I²C bus number (1 on all modern Raspberry Pi models)
 bme280_address = 0x76  # I²C address: 0x76 (SDO low) or 0x77 (SDO high)
+
+# InfluxDB v2 export (optional — remove section to disable)
+# Token: set via INFLUXDB_TOKEN env var (preferred) or token key below.
+# [influxdb]
+# url    = "http://192.168.1.100:8086"
+# org    = "My Home"
+# bucket = "weather"
+# token  = "paste-token-here-or-use-INFLUXDB_TOKEN-env-var"
+
+# MQTT export (optional — remove section to disable)
+# Password: set via MQTT_PASSWORD env var (preferred) or password key below.
+# [mqtt]
+# host     = "192.168.1.100"
+# port     = 1883
+# username = "your-username"
+# password = "paste-password-here-or-use-MQTT_PASSWORD-env-var"
 ```
 
 | Key | Description |
