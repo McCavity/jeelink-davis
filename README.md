@@ -178,6 +178,17 @@ Tests do not require hardware — the serial port is fully mocked.
 | `soil_moisture` | Soil moisture by zone | dict, zones 1–4 |
 | `leaf_wetness` | Leaf wetness by zone | dict, zones 1–4 |
 
+## Integrations
+
+The core setup (JeeLink + Davis ISS + web dashboard) works without any external services. The following integrations are optional and documented separately:
+
+| Integration | Guide | What it adds |
+|---|---|---|
+| **InfluxDB + Grafana** | [docs/influxdb-grafana.md](docs/influxdb-grafana.md) | Long-term storage, Grafana dashboard, hourly downsampling, host metrics via Telegraf |
+| **MQTT / ioBroker** | [docs/mqtt-iobroker.md](docs/mqtt-iobroker.md) | Publishes live readings as retained MQTT topics; integrates with ioBroker, Home Assistant, Node-RED, etc. |
+
+Both integrations are enabled by adding the corresponding section (`[influxdb]` or `[mqtt]`) to `config.toml`. Removing the section disables the integration entirely — no other changes required.
+
 ## License
 
 MIT
