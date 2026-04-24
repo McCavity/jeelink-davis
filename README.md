@@ -225,6 +225,10 @@ The core setup (JeeLink + Davis ISS + web dashboard) works without any external 
 
 Both integrations are enabled by adding the corresponding section (`[influxdb]` or `[mqtt]`) to `config.toml`. Removing the section disables the integration entirely — no other changes required.
 
+## AI-assisted development
+
+This project was developed with the help of [Claude Code](https://claude.ai/code) (Anthropic). The architecture, protocol reverse-engineering, and integration work were done by the author; Claude assisted with implementation, documentation, and debugging throughout.
+
 ## License
 
 MIT
