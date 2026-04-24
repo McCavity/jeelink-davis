@@ -19,3 +19,11 @@ url    = "http://192.168.178.161:8086"
 org    = "Smart Home"
 bucket = "weather"
 # token = "paste-token-here-or-use-INFLUXDB_TOKEN-env-var"
+
+# MQTT export (optional — remove section to disable)
+# Password: set via MQTT_PASSWORD env var (preferred) or password key below.
+[mqtt]
+host     = "192.168.178.152"
+port     = 1884
+username = "buttonplus"
+# password = "paste-password-here-or-use-MQTT_PASSWORD-env-var"

@@ -33,7 +33,7 @@ from .broadcaster import broadcaster
 from .bme280_reader import bme280_reader_thread
 from .config import load_config
 from .reader import station_reader_thread
-from . import influxdb_writer
+from . import influxdb_writer, mqtt_publisher
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -93,6 +93,22 @@ async def lifespan(app: FastAPI):
             _log.getLogger(__name__).warning(
                 "InfluxDB config found but no token — set INFLUXDB_TOKEN env var"
             )
+
+    mqtt_cfg = cfg.get("mqtt")
+    if mqtt_cfg:
+        mqtt_password = os.environ.get("MQTT_PASSWORD") or mqtt_cfg.get("password", "")
+        mqtt_t = threading.Thread(
+            target=mqtt_publisher.publisher_thread,
+            kwargs={
+                "host":     mqtt_cfg.get("host", "localhost"),
+                "port":     int(mqtt_cfg.get("port", 1883)),
+                "username": mqtt_cfg.get("username", ""),
+                "password": mqtt_password,
+            },
+            daemon=True,
+            name="mqtt-publisher",
+        )
+        mqtt_t.start()
 
     yield
 
