@@ -19,6 +19,42 @@ The bundled web dashboard (`web/`) is a single-page app served via FastAPI:
 
 ![Dashboard screenshot](docs/dashboard.png)
 
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Outdoor
+        ISS["Davis ISS\n(outdoor sensor unit)"]
+    end
+
+    subgraph Raspberry Pi
+        JL["JeeLink\nUSB receiver\n(868 MHz)"]
+        SVC["davis-weather\nservice\n(FastAPI)"]
+        DB[("SQLite\nreadings.db")]
+        BME["GY-BME280\n(I²C indoor sensor)"]
+    end
+
+    subgraph Optional integrations
+        IDB[("InfluxDB v2")]
+        GF["Grafana\ndashboard"]
+        MQ["MQTT broker\n(e.g. ioBroker)"]
+        IOB["ioBroker /\nHome Assistant /\nNode-RED"]
+    end
+
+    Browser["Web browser\n(live dashboard)"]
+
+    ISS -- "RF 868 MHz" --> JL
+    JL -- "USB serial" --> SVC
+    BME -- "I²C" --> SVC
+    SVC -- "store" --> DB
+    DB -- "query" --> SVC
+    SVC -- "SSE / REST" --> Browser
+    SVC -- "influxdb_writer" --> IDB
+    IDB --> GF
+    SVC -- "mqtt_publisher" --> MQ
+    MQ --> IOB
+```
+
 ### Indoor sensor (GY-BME280)
 
 A GY-BME280 connected to the Raspberry Pi I²C bus provides barometric pressure, indoor temperature, and indoor humidity. The I²C address and bus number are configured in `config.toml` (defaults: bus `1`, address `0x76`). It is polled every 60 s by a background thread and stored in a separate `indoor_readings` SQLite table. Pressure trend compares the average of the last 30 min against the average of the 2–4 h ago window — effectively a 3-hour rolling comparison (±0.5 hPa threshold → rising / falling / steady).

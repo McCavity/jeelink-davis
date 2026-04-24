@@ -1,0 +1,29 @@
+[station]
+name      = "Davis Vantage Pro 2"
+latitude  = 51.500000   # decimal degrees, positive = North
+longitude = 0.000000    # decimal degrees, positive = East
+elevation = 50          # metres above sea level
+timezone  = "Europe/London"
+
+[storage]
+db_path = "data/readings.db"   # relative to project root, or absolute path
+
+[sensors]
+bme280_bus     = 1     # I²C bus number (1 on all modern Raspberry Pi models)
+bme280_address = 0x76  # I²C address: 0x76 (SDO low) or 0x77 (SDO high)
+
+# InfluxDB v2 export (optional — remove section to disable)
+# Token: set via INFLUXDB_TOKEN env var (preferred) or token key below.
+# [influxdb]
+# url    = "http://192.168.1.100:8086"
+# org    = "My Home"
+# bucket = "weather"
+# token  = "paste-token-here-or-use-INFLUXDB_TOKEN-env-var"
+
+# MQTT export (optional — remove section to disable)
+# Password: set via MQTT_PASSWORD env var (preferred) or password key below.
+# [mqtt]
+# host     = "192.168.1.100"
+# port     = 1883
+# username = "your-username"
+# password = "paste-password-here-or-use-MQTT_PASSWORD-env-var"

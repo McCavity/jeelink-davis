@@ -8,7 +8,7 @@ End-to-end system for receiving **Davis Vantage Pro 2** weather station data via
 
 Target firmware on the JeeLink: **Davis 0.8e** (compiled Sep 5 2020, RFM69 radio, EU 868 MHz frequencies, firmware switch `b:2`).
 
-The system runs on a **Raspberry Pi** (hostname `dwsapp01`) with the JeeLink plugged into a USB port near a window for reliable ISS reception. The dashboard is served at `https://wetter.halfpap.io/` (port 8000 internally, reverse-proxied externally).
+The system runs on a **Raspberry Pi** with the JeeLink plugged into a USB port near a window for reliable ISS reception. The dashboard is served on port 8000 (optionally reverse-proxied for external access).
 
 ## Setup
 
@@ -47,14 +47,16 @@ sudo journalctl -u davis-weather -f
 ```toml
 [station]
 name      = "Davis Vantage Pro 2"
-latitude  = 50.174533   # decimal degrees, positive = North
-longitude = 8.719422    # decimal degrees, positive = East
-elevation = 167         # metres above sea level
-timezone  = "Europe/Berlin"
+latitude  = 51.500000   # decimal degrees, positive = North
+longitude = 0.000000    # decimal degrees, positive = East
+elevation = 50          # metres above sea level
+timezone  = "Europe/London"
 
 [storage]
 db_path = "data/readings.db"   # relative to project root, or absolute
 ```
+
+See `config.toml.example` for a full template including the optional `[influxdb]` and `[mqtt]` sections.
 
 ## Architecture
 
@@ -118,7 +120,7 @@ INFLUXDB_TOKEN=<token> .venv/bin/python tools/backfill_influxdb.py --since 2026-
 
 **Grafana Dashboard:** import `docs/grafana-davis-dashboard.json` via
 Dashboards → Import. Select the InfluxDB datasource when prompted.
-Bucket must exist in InfluxDB: `weather` (Org: Smart Home).
+Bucket must exist in InfluxDB: `weather` (org name as configured in `config.toml`).
 
 ## Web API endpoints
 
@@ -172,13 +174,12 @@ Bucket must exist in InfluxDB: `weather` (Org: Smart Home).
 
 ## Production deployment
 
-- **Host**: Raspberry Pi, hostname `dwsapp01`
+- **Host**: Raspberry Pi (any hostname)
 - **Install path**: `/opt/jeelink-davis/`
 - **Service**: `davis-weather.service` (systemd), runs as user `davis`
 - **Shutdown**: `--timeout-graceful-shutdown 3` + `TimeoutStopSec=10` to avoid SSE connections delaying reboots
 - **Database**: `/opt/jeelink-davis/data/readings.db` (SQLite, WAL mode)
 - **Deploy**: copy changed files to `/opt/jeelink-davis/`, then `sudo systemctl restart davis-weather` for Python changes; static files take effect immediately on browser refresh
-- **Screenshots**: `chromium --headless=new --screenshot=/tmp/shot.png --window-size=1400,900 https://wetter.halfpap.io/` then read `/tmp/shot.png`
 
 ## Indoor sensor (GY-BME280)
 
@@ -186,18 +187,3 @@ Connected to Raspberry Pi I²C bus 1 at address **0x76**. Polled every 60 s by `
 
 **Pressure trend** (`/api/indoor` → `pressure_trend`): compares avg pressure of the last 30 min vs 2–4 h ago. Threshold ±0.5 hPa → `rising` / `falling` / `steady` / `unknown` (insufficient history).
 
-## Organisation Context
-
-This repository is part of Henning Halfpap's personal GitHub collection, located at
-`/Users/hhalfpap/git/projects/own` on the development machine.
-
-- **Org index**: `/Users/hhalfpap/git/projects/own/org-index.json` — machine-readable
-  metadata for all repos (last commit, CLAUDE.md presence, file count, etc.)
-- **Org instructions**: `/Users/hhalfpap/git/projects/own/CLAUDE.md` — guidance for
-  cross-repo maintenance tasks (checking sync status, stale repos, etc.)
-
-For project-specific work, operate within this directory. For questions spanning
-multiple repos, consult the org index first.
-
-**Tooling rule**: Skills, plugins, and MCP servers are always installed at project level
-(`.claude/settings.json` in this directory), never at user/global level.

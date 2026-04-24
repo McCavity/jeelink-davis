@@ -27,3 +27,7 @@ htmlcov/
 data/*.db
 data/*.db-wal
 data/*.db-shm
+
+# Local configuration — contains personal location data and credentials.
+# Copy config.toml.example to config.toml and fill in your values.
+config.toml
