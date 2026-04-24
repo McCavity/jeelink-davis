@@ -1527,12 +1527,19 @@
             {
               "options": {
                 "0": {
-                  "color": "red",
-                  "text": "GESTOPPT"
-                },
-                "1": {
                   "color": "green",
+                  "index": 0,
                   "text": "l\u00e4uft"
+                },
+                "2": {
+                  "color": "orange",
+                  "index": 1,
+                  "text": "inaktiv"
+                },
+                "3": {
+                  "color": "red",
+                  "index": 2,
+                  "text": "FEHLER"
                 }
               },
               "type": "value"
@@ -1542,12 +1549,16 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "green",
                 "value": null
               },
               {
-                "color": "green",
+                "color": "orange",
                 "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
               }
             ]
           },
@@ -1607,6 +1618,6 @@
   "timezone": "Europe/Berlin",
   "title": "Davis Wetterstation",
   "uid": "davis-wetterstation",
-  "version": 4,
+  "version": 5,
   "weekStart": ""
 }
