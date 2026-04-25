@@ -241,6 +241,10 @@ The core setup (JeeLink + Davis ISS + web dashboard) works without any external 
 
 Both integrations are enabled by adding the corresponding section (`[influxdb]` or `[mqtt]`) to `config.toml`. Removing the section disables the integration entirely — no other changes required.
 
+## Community
+
+- **ioBroker forum thread** (German): [Davis Vantage Pro 2 + ioBroker in 2026](https://forum.iobroker.net/topic/84389/davis-vantage-pro-2-iobroker-in-2026) — background on the project, hardware setup, and MQTT integration. English readers: browser translation works well.
+
 ## AI-assisted development
 
 This project was developed with the help of [Claude Code](https://claude.ai/code) (Anthropic). The architecture, protocol reverse-engineering, and integration work were done by the author; Claude assisted with implementation, documentation, and debugging throughout.
