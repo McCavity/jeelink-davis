@@ -8,7 +8,8 @@
     "battery_ok":   "OK",
     "battery_low":  "LOW",
     "tab_live":     "Live",
-    "tab_history":  "History"
+    "tab_history":  "History",
+    "tab_radar":    "Radar"
   },
   "cards": {
     "temperature":    "Temperature",
@@ -97,6 +98,15 @@
     "pressure_avg":   "Avg hPa",
     "pressure_max":   "Max hPa",
     "stats_pressure": "Pressure min / avg / max"
+  },
+  "radar": {
+    "title":       "Rain Radar",
+    "loading":     "Loading radar data…",
+    "play":        "▶ Play",
+    "pause":       "⏸ Pause",
+    "now":         "Now",
+    "source":      "Source: DWD Open Data",
+    "frame":       "Frame"
   },
   "wmo": {
     "0":  "Clear sky",

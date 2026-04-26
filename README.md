@@ -15,6 +15,7 @@ The bundled web dashboard (`web/`) is a single-page app served via FastAPI:
 - **Historical data browser** — 1D / 7D / 1M / 1Y and custom date range with auto-bucketed charts (5 min → 1 h → 6 h → daily) and metric tabs (temperature, rain, wind, humidity)
 - **5-day forecast** — via Open-Meteo (cached 30 min)
 - **Sun & moon strip** — dawn, sunrise, noon, sunset, dusk, moon phase
+- **Rain radar** — animated DWD radar composite (last 60 min, 5-min steps) via Leaflet + DWD Open Data WMS; station marker, play/pause, scrubber, zoom-limited map
 - **EN / DE** — language toggle, persisted in localStorage
 
 ![Dashboard screenshot](docs/dashboard.png)

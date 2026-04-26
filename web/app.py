@@ -159,6 +159,13 @@ async def stream():
     )
 
 
+@app.get("/api/location")
+async def location():
+    """Returns station latitude and longitude for client-side map centering."""
+    cfg = load_config()["station"]
+    return {"lat": cfg["latitude"], "lon": cfg["longitude"]}
+
+
 @app.get("/api/solar")
 async def solar():
     """Returns today's sun times and moon phase for the configured location."""
