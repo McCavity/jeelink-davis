@@ -7,6 +7,8 @@
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
     body { font-family: 'Inter', sans-serif; }
@@ -178,6 +180,7 @@
   <div class="max-w-7xl mx-auto mb-4 border-b border-slate-800">
     <button id="tab-live"    class="page-tab active" onclick="setTab('live')"    data-i18n="ui.tab_live">Live</button>
     <button id="tab-history" class="page-tab"        onclick="setTab('history')" data-i18n="ui.tab_history">History</button>
+    <button id="tab-radar"   class="page-tab"        onclick="setTab('radar')"   data-i18n="ui.tab_radar">Radar</button>
   </div>
 
   <!-- ── Live section ─────────────────────────────────────────────────── -->
@@ -434,6 +437,34 @@
 
   </div><!-- /section-history -->
 
+  <!-- ── Radar section ───────────────────────────────────────────────── -->
+  <div id="section-radar" class="hidden">
+  <div class="max-w-7xl mx-auto mb-4">
+    <div class="card" style="padding:1rem">
+
+      <!-- Controls -->
+      <div class="flex flex-wrap items-center gap-3 mb-3">
+        <div data-i18n="radar.title" class="card-label" style="margin-bottom:0">Rain Radar</div>
+        <button id="radar-play-btn" class="hist-btn active" onclick="radarTogglePlay()">▶ Play</button>
+        <span id="radar-timestamp" class="mono text-xs text-slate-400">—</span>
+        <span class="flex-1"></span>
+        <span data-i18n="radar.source" class="text-xs text-slate-700">Source: DWD Open Data</span>
+      </div>
+
+      <!-- Frame scrubber -->
+      <div class="flex items-center gap-2 mb-3">
+        <input id="radar-scrubber" type="range" min="0" max="11" value="11"
+               style="flex:1;accent-color:rgb(56,189,248)"
+               oninput="radarScrub(parseInt(this.value))">
+      </div>
+
+      <!-- Map -->
+      <div id="radar-map" style="aspect-ratio:1/1;border-radius:0.75rem;overflow:hidden;background:rgb(15,23,42)"></div>
+
+    </div>
+  </div>
+  </div><!-- /section-radar -->
+
   <!-- ── Footer ───────────────────────────────────────────────────────── -->
   <div class="max-w-7xl mx-auto mt-2 text-center text-xs text-slate-700 pb-4">
     Davis Vantage Pro 2 · JeeLink 0.8e · 868 MHz EU ·
@@ -502,6 +533,7 @@ async function setLang(lang) {
   // Re-render dynamic sections that embed translated strings
   if (lastSolarData)    applySolar(lastSolarData);
   if (lastForecastData) renderForecast(lastForecastData);
+  if (radarInitDone)    radarShowFrame(radarIdx);
 
   // Re-apply dynamic UI state that contains translated strings
   renderDynamicLabels();
@@ -1185,10 +1217,12 @@ async function loadDayTemp() {
 function setTab(tab) {
   document.getElementById('section-live').classList.toggle('hidden',    tab !== 'live');
   document.getElementById('section-history').classList.toggle('hidden', tab !== 'history');
+  document.getElementById('section-radar').classList.toggle('hidden',   tab !== 'radar');
   document.getElementById('tab-live').classList.toggle('active',    tab === 'live');
   document.getElementById('tab-history').classList.toggle('active',  tab === 'history');
-  // Chart.js doesn't know dimensions while section is hidden — resize after reveal
+  document.getElementById('tab-radar').classList.toggle('active',    tab === 'radar');
   if (tab === 'history') requestAnimationFrame(() => histChart?.resize());
+  if (tab === 'radar')   initRadar();
 }
 
 // ── History section ────────────────────────────────────────────────────────
@@ -1549,7 +1583,127 @@ function connectSSE() {
   connectSSE();
 })();
 
-// Refresh solar at midnight, forecast every 30 min, today stats every 60 s,
+// ── Radar ──────────────────────────────────────────────────────────────────
+const DWD_WMS      = 'https://maps.dwd.de/geoserver/dwd/wms';
+const RADAR_FRAMES = 12;   // 12 × 5 min = 60 min history
+const RADAR_FPS    = 600;  // ms per frame
+
+let radarMap       = null;
+let radarLayer     = null;
+let radarMarker    = null;
+let radarFrames    = [];   // UTC ISO strings for each frame
+let radarIdx       = RADAR_FRAMES - 1;
+let radarPlaying   = false;
+let radarTimer     = null;
+let radarInitDone  = false;
+let radarLocation  = null; // {lat, lon}
+
+function radarBuildFrames() {
+  // DWD RX-Produkt is available with ~10 min lag, rounded to 5-min grid
+  const now  = new Date();
+  const lag  = 10 * 60 * 1000;
+  const snap = 5  * 60 * 1000;
+  const base = new Date(Math.floor((now - lag) / snap) * snap);
+  const frames = [];
+  for (let i = RADAR_FRAMES - 1; i >= 0; i--) {
+    frames.push(new Date(base - i * snap).toISOString().replace('.000', ''));
+  }
+  return frames;
+}
+
+function radarFormatTime(iso) {
+  const d = new Date(iso);
+  return d.toLocaleTimeString(currentLang === 'de' ? 'de-DE' : 'en-GB',
+    { hour: '2-digit', minute: '2-digit', hour12: false }) + ' UTC';
+}
+
+function radarShowFrame(idx) {
+  radarIdx = idx;
+  document.getElementById('radar-scrubber').value = idx;
+
+  const ts  = radarFrames[idx];
+  const isLast = idx === radarFrames.length - 1;
+  document.getElementById('radar-timestamp').textContent =
+    radarFormatTime(ts) + (isLast ? '  (' + tr('radar.now', 'Now') + ')' : '');
+
+  if (radarMap && radarFrames.length) {
+    if (radarLayer) radarMap.removeLayer(radarLayer);
+    radarLayer = L.tileLayer.wms(DWD_WMS, {
+      layers:      'dwd:RX-Produkt',
+      format:      'image/png',
+      transparent: true,
+      opacity:     0.65,
+      time:        ts,
+      attribution: 'Radar &copy; DWD',
+    });
+    radarLayer.addTo(radarMap);
+  }
+}
+
+function radarStep() {
+  const next = (radarIdx + 1) % radarFrames.length;
+  radarShowFrame(next);
+  // Rebuild frame list when we loop back to start (keeps times fresh)
+  if (next === 0) radarFrames = radarBuildFrames();
+}
+
+function radarTogglePlay() {
+  radarPlaying = !radarPlaying;
+  const btn = document.getElementById('radar-play-btn');
+  btn.textContent = radarPlaying ? tr('radar.pause', '⏸ Pause') : tr('radar.play', '▶ Play');
+  if (radarPlaying) {
+    radarTimer = setInterval(radarStep, RADAR_FPS);
+  } else {
+    clearInterval(radarTimer);
+    radarTimer = null;
+  }
+}
+
+function radarScrub(idx) {
+  if (radarPlaying) { clearInterval(radarTimer); radarTimer = null; radarPlaying = false; }
+  document.getElementById('radar-play-btn').textContent = tr('radar.play', '▶ Play');
+  radarShowFrame(idx);
+}
+
+async function initRadar() {
+  if (radarInitDone) return;
+  radarInitDone = true;
+
+  // Fetch station location
+  try {
+    const res = await fetch('/api/location');
+    if (res.ok) radarLocation = await res.json();
+  } catch (_) {}
+  const lat = radarLocation?.lat ?? 51.5;
+  const lon = radarLocation?.lon ?? 10.0;
+
+  radarFrames = radarBuildFrames();
+
+  // Init Leaflet map
+  radarMap = L.map('radar-map', { zoomControl: true, maxZoom: 13 }).setView([lat, lon], 9);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    maxZoom: 13,
+  }).addTo(radarMap);
+
+  // Station marker — rote Pin-Nadel
+  const icon = L.divIcon({
+    html: `<svg width="28" height="40" viewBox="0 0 28 40" xmlns="http://www.w3.org/2000/svg">
+      <path d="M14 0C6.268 0 0 6.268 0 14c0 10.5 14 26 14 26S28 24.5 28 14C28 6.268 21.732 0 14 0z"
+            fill="#ef4444" stroke="#fff" stroke-width="2"/>
+      <circle cx="14" cy="14" r="5" fill="white"/>
+    </svg>`,
+    iconSize: [28, 40], iconAnchor: [14, 40], className: '',
+  });
+  radarMarker = L.marker([lat, lon], { icon }).addTo(radarMap);
+  radarMarker.bindTooltip(tr('cards.temperature', 'Station'), { permanent: false });
+
+  // Show latest frame, pausiert starten
+  radarShowFrame(radarFrames.length - 1);
+}
+
+// ── Refresh solar at midnight, forecast every 30 min, today stats every 60 s,
 // 24-h temp chart every 5 min (live readings also update it in real time)
 const now = new Date();
 setTimeout(() => {

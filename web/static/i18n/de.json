@@ -8,7 +8,8 @@
     "battery_ok":   "OK",
     "battery_low":  "SCHWACH",
     "tab_live":     "Live",
-    "tab_history":  "Verlauf"
+    "tab_history":  "Verlauf",
+    "tab_radar":    "Radar"
   },
   "cards": {
     "temperature":    "Temperatur",
@@ -97,6 +98,15 @@
     "pressure_avg":   "Mittel hPa",
     "pressure_max":   "Max hPa",
     "stats_pressure": "Luftdruck Min / Mittel / Max"
+  },
+  "radar": {
+    "title":       "Regenradar",
+    "loading":     "Lade Radardaten…",
+    "play":        "▶ Play",
+    "pause":       "⏸ Pause",
+    "now":         "Jetzt",
+    "source":      "Quelle: DWD Open Data",
+    "frame":       "Bild"
   },
   "wmo": {
     "0":  "Klarer Himmel",
