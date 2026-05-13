@@ -167,6 +167,19 @@ def query_today_minmax() -> dict:
     con = _get_connection()
     row = con.execute(
         """
+        WITH rain AS (
+            SELECT COALESCE(SUM(
+                CASE WHEN tip_delta >= 0 THEN tip_delta ELSE tip_delta + 128 END
+            ) * 0.2, 0.0) AS rain_mm
+            FROM (
+                SELECT rain_tip_count
+                       - LAG(rain_tip_count) OVER (ORDER BY timestamp) AS tip_delta
+                FROM readings
+                WHERE date(timestamp, 'localtime') = date('now', 'localtime')
+                  AND rain_tip_count IS NOT NULL
+            )
+            WHERE tip_delta IS NOT NULL
+        )
         SELECT
             MIN(temperature)    AS temp_min,
             MAX(temperature)    AS temp_max,
@@ -177,8 +190,7 @@ def query_today_minmax() -> dict:
             MAX(wind_gust)      AS wind_gust_max,
             MIN(rssi)           AS rssi_min,
             MAX(rssi)           AS rssi_max,
-            MIN(rain_tip_count) AS rain_tip_min,
-            MAX(rain_tip_count) AS rain_tip_max
+            (SELECT rain_mm FROM rain) AS rain_mm
         FROM readings
         WHERE date(timestamp, 'localtime') = date('now', 'localtime')
         """,
@@ -186,12 +198,8 @@ def query_today_minmax() -> dict:
     if row is None:
         return {}
     d = dict(row)
-    tip_min = d.pop("rain_tip_min")
-    tip_max = d.pop("rain_tip_max")
-    if tip_min is not None and tip_max is not None:
-        d["rain_mm"] = round((tip_max - tip_min) * 0.2, 1)
-    else:
-        d["rain_mm"] = None
+    rain = d.get("rain_mm")
+    d["rain_mm"] = round(rain, 1) if rain is not None else None
     return d
 
 
@@ -273,28 +281,44 @@ def query_range_bucketed(start: str, end: str) -> dict:
         bucket_minutes = 1440
         bucket_sql = "strftime('%Y-%m-%d', timestamp, 'localtime')"
 
+    # bucket_sql uses plain "timestamp" — qualify for the aliased outer join
+    r_bucket_sql = bucket_sql.replace("timestamp", "r.timestamp")
+
     con = _get_connection()
     rows = con.execute(
         f"""
+        WITH rain_deltas AS (
+            SELECT
+                timestamp,
+                CASE
+                    WHEN rain_tip_count - LAG(rain_tip_count) OVER w >= 0
+                    THEN rain_tip_count - LAG(rain_tip_count) OVER w
+                    ELSE rain_tip_count + 128 - LAG(rain_tip_count) OVER w
+                END AS tip_delta
+            FROM readings
+            WHERE date(timestamp, 'localtime') BETWEEN ? AND ?
+              AND rain_tip_count IS NOT NULL
+            WINDOW w AS (
+                PARTITION BY date(timestamp, 'localtime')
+                ORDER BY timestamp
+            )
+        )
         SELECT
-            ({bucket_sql})                              AS bucket,
-            ROUND(MIN(temperature), 1)                 AS temp_min,
-            ROUND(AVG(temperature), 1)                 AS temp_avg,
-            ROUND(MAX(temperature), 1)                 AS temp_max,
-            ROUND(AVG(humidity), 0)                    AS humidity_avg,
-            ROUND(AVG(wind_speed), 1)                  AS wind_avg,
-            ROUND(MAX(wind_gust), 1)                   AS wind_gust_max,
-            CASE
-                WHEN MAX(rain_tip_count) >= MIN(rain_tip_count)
-                THEN ROUND((MAX(rain_tip_count) - MIN(rain_tip_count)) * 0.2, 1)
-                ELSE 0.0
-            END                                        AS rain_mm
-        FROM readings
-        WHERE date(timestamp, 'localtime') BETWEEN ? AND ?
-        GROUP BY bucket
-        ORDER BY bucket
+            ({r_bucket_sql})                                 AS bucket,
+            ROUND(MIN(r.temperature), 1)                    AS temp_min,
+            ROUND(AVG(r.temperature), 1)                    AS temp_avg,
+            ROUND(MAX(r.temperature), 1)                    AS temp_max,
+            ROUND(AVG(r.humidity), 0)                       AS humidity_avg,
+            ROUND(AVG(r.wind_speed), 1)                     AS wind_avg,
+            ROUND(MAX(r.wind_gust), 1)                      AS wind_gust_max,
+            ROUND(COALESCE(SUM(rd.tip_delta), 0.0) * 0.2, 1) AS rain_mm
+        FROM readings r
+        LEFT JOIN rain_deltas rd ON rd.timestamp = r.timestamp
+        WHERE date(r.timestamp, 'localtime') BETWEEN ? AND ?
+        GROUP BY ({r_bucket_sql})
+        ORDER BY ({r_bucket_sql})
         """,
-        (start, end),
+        (start, end, start, end),
     ).fetchall()
 
     return {"bucket_minutes": bucket_minutes, "data": [dict(r) for r in rows]}
@@ -368,16 +392,24 @@ def query_rain_totals() -> dict:
             """
             SELECT COALESCE(SUM(daily_rain), 0.0) AS rain_mm
             FROM (
-                SELECT CASE
-                           WHEN MAX(rain_tip_count) >= MIN(rain_tip_count)
-                           THEN ROUND((MAX(rain_tip_count) - MIN(rain_tip_count)) * 0.2, 1)
-                           ELSE 0
-                       END AS daily_rain
-                FROM   readings
-                WHERE  date(timestamp, 'localtime') >= ?
-                  AND  date(timestamp, 'localtime') <= ?
-                  AND  rain_tip_count IS NOT NULL
-                GROUP  BY date(timestamp, 'localtime')
+                SELECT
+                    date(timestamp, 'localtime') AS day,
+                    SUM(CASE WHEN tip_delta >= 0 THEN tip_delta ELSE tip_delta + 128 END)
+                        * 0.2 AS daily_rain
+                FROM (
+                    SELECT
+                        timestamp,
+                        rain_tip_count
+                        - LAG(rain_tip_count) OVER (
+                            PARTITION BY date(timestamp, 'localtime')
+                            ORDER BY timestamp
+                        ) AS tip_delta
+                    FROM readings
+                    WHERE date(timestamp, 'localtime') BETWEEN ? AND ?
+                      AND rain_tip_count IS NOT NULL
+                )
+                WHERE tip_delta IS NOT NULL
+                GROUP BY day
             )
             """,
             (start.isoformat(), today.isoformat()),
@@ -408,24 +440,45 @@ def query_stats(period: str) -> list[dict]:
     if period == "daily":
         rows = con.execute(
             """
+            WITH rain_per_day AS (
+                SELECT
+                    date(timestamp, 'localtime') AS day,
+                    SUM(CASE WHEN tip_delta >= 0 THEN tip_delta ELSE tip_delta + 128 END)
+                        * 0.2 AS rain_mm
+                FROM (
+                    SELECT
+                        timestamp,
+                        rain_tip_count
+                        - LAG(rain_tip_count) OVER (
+                            PARTITION BY date(timestamp, 'localtime')
+                            ORDER BY timestamp
+                        ) AS tip_delta
+                    FROM readings
+                    WHERE rain_tip_count IS NOT NULL
+                )
+                WHERE tip_delta IS NOT NULL
+                GROUP BY day
+            )
             SELECT
-                strftime('%Y-%m-%d', timestamp, 'localtime') AS period,
-                MIN(temperature)  AS temp_min,
-                MAX(temperature)  AS temp_max,
-                AVG(temperature)  AS temp_avg,
-                MIN(humidity)     AS humidity_min,
-                MAX(humidity)     AS humidity_max,
-                AVG(humidity)     AS humidity_avg,
-                MIN(wind_speed)   AS wind_speed_min,
-                MAX(wind_speed)   AS wind_speed_max,
-                AVG(wind_speed)   AS wind_speed_avg,
-                MAX(wind_gust)    AS wind_gust_max,
-                MIN(rssi)         AS rssi_min,
-                MAX(rssi)         AS rssi_max,
-                AVG(rssi)         AS rssi_avg,
-                (MAX(rain_tip_count) - MIN(rain_tip_count)) * 0.2 AS rain_mm,
-                COUNT(*)          AS sample_count
-            FROM readings
+                strftime('%Y-%m-%d', r.timestamp, 'localtime') AS period,
+                MIN(r.temperature)  AS temp_min,
+                MAX(r.temperature)  AS temp_max,
+                AVG(r.temperature)  AS temp_avg,
+                MIN(r.humidity)     AS humidity_min,
+                MAX(r.humidity)     AS humidity_max,
+                AVG(r.humidity)     AS humidity_avg,
+                MIN(r.wind_speed)   AS wind_speed_min,
+                MAX(r.wind_speed)   AS wind_speed_max,
+                AVG(r.wind_speed)   AS wind_speed_avg,
+                MAX(r.wind_gust)    AS wind_gust_max,
+                MIN(r.rssi)         AS rssi_min,
+                MAX(r.rssi)         AS rssi_max,
+                AVG(r.rssi)         AS rssi_avg,
+                COALESCE(rpd.rain_mm, 0.0) AS rain_mm,
+                COUNT(*)            AS sample_count
+            FROM readings r
+            LEFT JOIN rain_per_day rpd
+                ON strftime('%Y-%m-%d', r.timestamp, 'localtime') = rpd.day
             GROUP BY period
             ORDER BY period ASC
             """
@@ -435,23 +488,42 @@ def query_stats(period: str) -> list[dict]:
         outer_fmt = "'%Y-%m'" if period == "monthly" else "'%Y'"
         rows = con.execute(
             f"""
+            WITH rain_per_day AS (
+                SELECT
+                    date(timestamp, 'localtime') AS day,
+                    SUM(CASE WHEN tip_delta >= 0 THEN tip_delta ELSE tip_delta + 128 END)
+                        * 0.2 AS rain_mm
+                FROM (
+                    SELECT
+                        timestamp,
+                        rain_tip_count
+                        - LAG(rain_tip_count) OVER (
+                            PARTITION BY date(timestamp, 'localtime')
+                            ORDER BY timestamp
+                        ) AS tip_delta
+                    FROM readings
+                    WHERE rain_tip_count IS NOT NULL
+                )
+                WHERE tip_delta IS NOT NULL
+                GROUP BY day
+            )
             SELECT
-                strftime({outer_fmt}, day, 'localtime') AS period,
-                MIN(temp_min)      AS temp_min,
-                MAX(temp_max)      AS temp_max,
-                AVG(temp_avg)      AS temp_avg,
-                MIN(humidity_min)  AS humidity_min,
-                MAX(humidity_max)  AS humidity_max,
-                AVG(humidity_avg)  AS humidity_avg,
-                MIN(ws_min)        AS wind_speed_min,
-                MAX(ws_max)        AS wind_speed_max,
-                AVG(ws_avg)        AS wind_speed_avg,
-                MAX(wg_max)        AS wind_gust_max,
-                MIN(rssi_min)      AS rssi_min,
-                MAX(rssi_max)      AS rssi_max,
-                AVG(rssi_avg)      AS rssi_avg,
-                SUM(daily_rain_mm) AS rain_mm,
-                SUM(sample_count)  AS sample_count
+                strftime({outer_fmt}, d.day, 'localtime') AS period,
+                MIN(d.temp_min)      AS temp_min,
+                MAX(d.temp_max)      AS temp_max,
+                AVG(d.temp_avg)      AS temp_avg,
+                MIN(d.humidity_min)  AS humidity_min,
+                MAX(d.humidity_max)  AS humidity_max,
+                AVG(d.humidity_avg)  AS humidity_avg,
+                MIN(d.ws_min)        AS wind_speed_min,
+                MAX(d.ws_max)        AS wind_speed_max,
+                AVG(d.ws_avg)        AS wind_speed_avg,
+                MAX(d.wg_max)        AS wind_gust_max,
+                MIN(d.rssi_min)      AS rssi_min,
+                MAX(d.rssi_max)      AS rssi_max,
+                AVG(d.rssi_avg)      AS rssi_avg,
+                SUM(COALESCE(rpd.rain_mm, 0.0)) AS rain_mm,
+                SUM(d.sample_count)  AS sample_count
             FROM (
                 SELECT
                     strftime('%Y-%m-%d', timestamp, 'localtime') AS day,
@@ -468,11 +540,11 @@ def query_stats(period: str) -> list[dict]:
                     MIN(rssi)         AS rssi_min,
                     MAX(rssi)         AS rssi_max,
                     AVG(rssi)         AS rssi_avg,
-                    (MAX(rain_tip_count) - MIN(rain_tip_count)) * 0.2 AS daily_rain_mm,
                     COUNT(*)          AS sample_count
                 FROM readings
                 GROUP BY day
-            )
+            ) d
+            LEFT JOIN rain_per_day rpd ON d.day = rpd.day
             GROUP BY period
             ORDER BY period ASC
             """
