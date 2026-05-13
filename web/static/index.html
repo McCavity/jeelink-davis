@@ -627,17 +627,27 @@ function cycleTemp() {
 }
 
 // ── Rain rate & elapsed tracking ───────────────────────────────────────────
-let lastTipWallTime = null;  // Date.now() when the last bucket tip was received
+// Persisted across reloads via localStorage
+const _storedTip = localStorage.getItem('lastTipWallTime');
+let lastTipWallTime = _storedTip ? parseInt(_storedTip, 10) : null;
 let lastRainSecs    = null;  // inter-tip interval (s) at that moment
 const RAIN_ACTIVE_SECS = 1800; // 30 min decay — after this, rate resets to 0
 
+function humanElapsed(ms) {
+  const s = Math.floor(ms / 1000);
+  if (s < 60)    return s + ' '                  + tr('cards.rain_ago',     's ago');
+  if (s < 3600)  return Math.floor(s / 60)   + ' ' + tr('cards.rain_ago_min', 'min ago');
+  if (s < 86400) return Math.floor(s / 3600)  + ' ' + tr('cards.rain_ago_h',   'h ago');
+  return           Math.floor(s / 86400) + ' ' + tr('cards.rain_ago_d',   'd ago');
+}
+
 function tickRain() {
   if (lastTipWallTime === null) return;
-  const elapsed = Math.floor((Date.now() - lastTipWallTime) / 1000);
-  const active  = elapsed < RAIN_ACTIVE_SECS;
+  const elapsed = Date.now() - lastTipWallTime;
+  const active  = elapsed < RAIN_ACTIVE_SECS * 1000;
   const rate    = (active && lastRainSecs > 0) ? 720 / lastRainSecs : 0;
 
-  setText('rain-secs-val', elapsed + ' ' + tr('cards.rain_ago', 's ago'));
+  setText('rain-secs-val', humanElapsed(elapsed));
   setText('rain-rate-val', fmt(rate, 1));
 
   const icon = document.getElementById('rain-drop-icon');
@@ -988,8 +998,9 @@ function renderState() {
 
   // Rain — tip time tracking; rate & elapsed display handled by tickRain()
   if (s.rain_secs != null && s.rain_secs >= 0) {
-    lastTipWallTime = Date.now();
+    lastTipWallTime = Date.now() - s.rain_secs * 1000;
     lastRainSecs    = s.rain_secs;
+    localStorage.setItem('lastTipWallTime', lastTipWallTime);
   }
 }
 
