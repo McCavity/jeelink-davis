@@ -110,6 +110,7 @@
     "now":         "Jetzt",
     "observed":    "Beobachtung",
     "forecast":    "Vorhersage",
+    "warmup":      "Lade",
     "source":      "Quelle: DWD Open Data",
     "frame":       "Bild"
   },

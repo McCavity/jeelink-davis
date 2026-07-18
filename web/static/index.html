@@ -1611,14 +1611,15 @@ const RADAR_NOW_IDX = RADAR_PAST - 1;  // last observed frame — the honest "no
 const RADAR_FPS    = 600;  // ms per frame
 
 let radarMap       = null;
-let radarLayer     = null;
 let radarMarker    = null;
 let radarFrames    = [];   // UTC ISO strings for each frame
+let radarLayers    = [];   // one WMS layer per frame, parallel to radarFrames
 let radarIdx       = RADAR_NOW_IDX;
 let radarPlaying   = false;
 let radarTimer     = null;
 let radarInitDone  = false;
 let radarLocation  = null; // {lat, lon}
+let radarResume    = false;  // was playing when a reload interrupted us
 
 function radarBuildFrames() {
   // DWD radar composite is available with ~5 min lag; we allow 10 min and
@@ -1645,6 +1646,62 @@ function radarFormatTime(iso) {
     { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
+// The DWD sends no cache headers at all, so a tile fetched a second time is a
+// second trip over the wire — measurably (~110 ms either way). Rebuilding the
+// layer per frame therefore re-downloaded the whole loop, every loop, and left
+// frames half-drawn at 600 ms each. Instead every frame gets its own layer,
+// all of them are put on the map once at opacity 0, and playback only shuffles
+// opacity. No network traffic while playing.
+function radarMakeLayer(ts) {
+  const layer = L.tileLayer.wms(DWD_WMS, {
+    // RV product covers observations *and* nowcast in one layer, so the
+    // colour scale stays consistent across the now boundary
+    layers:      'dwd:Radar_rv_product_1x1km_ger',
+    format:      'image/png',
+    transparent: true,
+    opacity:     0,
+    time:        ts,
+    attribution: 'Radar &copy; DWD',
+  });
+  // Leaflet fires `load` once every tile in view has arrived — also again
+  // after a pan or zoom, which is exactly when we need to warm up anew.
+  // The flag lives on the layer, not in an index-keyed set, so sliding the
+  // window never has to re-key anything.
+  layer.ready = false;
+  layer.on('load',      () => { layer.ready = true;  radarUpdateWarmup(); });
+  layer.on('loading',   () => { layer.ready = false; radarUpdateWarmup(); });
+  return layer;
+}
+
+function radarBuildLayers() {
+  radarLayers.forEach(l => radarMap.removeLayer(l));
+  radarLayers = radarFrames.map(ts => radarMakeLayer(ts).addTo(radarMap));
+}
+
+function radarWarmCount() {
+  return radarLayers.filter(l => l.ready).length;
+}
+
+function radarIsWarm() {
+  return radarLayers.length > 0 && radarWarmCount() === radarLayers.length;
+}
+
+function radarUpdateWarmup() {
+  const btn = document.getElementById('radar-play-btn');
+  if (!btn) return;
+  if (radarIsWarm()) {
+    btn.disabled = false;
+    btn.style.opacity = '';
+    btn.textContent = radarPlaying ? tr('radar.pause', '⏸ Pause') : tr('radar.play', '▶ Play');
+    if (radarResume && !radarPlaying) { radarResume = false; radarTogglePlay(); }
+  } else {
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+    btn.textContent = tr('radar.warmup', 'Loading') + ' ' +
+      (radarLayers.length ? radarWarmCount() + '/' + radarLayers.length : '…');
+  }
+}
+
 function radarShowFrame(idx) {
   radarIdx = idx;
   document.getElementById('radar-scrubber').value = idx;
@@ -1655,30 +1712,44 @@ function radarShowFrame(idx) {
   else if (idx >   RADAR_NOW_IDX) tag = '  (' + tr('radar.forecast', 'Forecast') + ')';
   document.getElementById('radar-timestamp').textContent = radarFormatTime(ts) + tag;
 
-  if (radarMap && radarFrames.length) {
-    if (radarLayer) radarMap.removeLayer(radarLayer);
-    radarLayer = L.tileLayer.wms(DWD_WMS, {
-      // RV product covers observations *and* nowcast in one layer, so the
-      // colour scale stays consistent across the now boundary
-      layers:      'dwd:Radar_rv_product_1x1km_ger',
-      format:      'image/png',
-      transparent: true,
-      opacity:     0.65,
-      time:        ts,
-      attribution: 'Radar &copy; DWD',
-    });
-    radarLayer.addTo(radarMap);
+  radarLayers.forEach((layer, i) => layer.setOpacity(i === idx ? 0.65 : 0));
+}
+
+// Slide the window forward when the DWD has published newer frames: drop as
+// many layers off the front as we append at the back. Using shift/push rather
+// than a start pointer keeps every index the plain array position — at 24
+// elements the copying is free, and it removes the modulo arithmetic that
+// off-by-one errors like to hide in.
+function radarRotate() {
+  const fresh = radarBuildFrames();
+  const snap  = 5 * 60 * 1000;
+  const steps = Math.round(
+    (new Date(fresh[fresh.length - 1]) - new Date(radarFrames[radarFrames.length - 1])) / snap);
+  if (steps <= 0) return;
+
+  radarFrames = fresh;
+  if (steps >= RADAR_FRAMES) { radarBuildLayers(); radarIdx = RADAR_NOW_IDX; return; }
+
+  for (let n = 0; n < steps; n++) {
+    radarMap.removeLayer(radarLayers.shift());
+    radarLayers.push(radarMakeLayer(radarFrames[RADAR_FRAMES - steps + n]).addTo(radarMap));
   }
+  radarIdx = Math.max(0, radarIdx - steps);   // window slid underneath the cursor
+  radarUpdateWarmup();
 }
 
 function radarStep() {
   const next = (radarIdx + 1) % radarFrames.length;
   radarShowFrame(next);
-  // Rebuild frame list when we loop back to start (keeps times fresh)
-  if (next === 0) radarFrames = radarBuildFrames();
+  if (next === 0) radarRotate();   // check for newer frames once per loop
 }
 
 function radarTogglePlay() {
+  // Nothing to play before the buffer is warm. The button is disabled then,
+  // but initRadar awaits /api/location first, so on a slow link there is a
+  // window where it is still live and radarFrames is empty — stepping through
+  // that would divide by zero and render an Invalid Date.
+  if (!radarPlaying && !radarIsWarm()) return;
   radarPlaying = !radarPlaying;
   const btn = document.getElementById('radar-play-btn');
   btn.textContent = radarPlaying ? tr('radar.pause', '⏸ Pause') : tr('radar.play', '▶ Play');
@@ -1699,6 +1770,8 @@ function radarScrub(idx) {
 async function initRadar() {
   if (radarInitDone) return;
   radarInitDone = true;
+
+  radarUpdateWarmup();   // lock Play before the first await, not after
 
   // Fetch station location
   try {
@@ -1738,6 +1811,17 @@ async function initRadar() {
   document.getElementById('radar-scale-future').style.flex = RADAR_FUTURE;
   document.getElementById('radar-label-past').style.flex   = RADAR_PAST;
   document.getElementById('radar-label-future').style.flex = RADAR_FUTURE;
+
+  // Panning or zooming invalidates the tiles of all 24 layers at once. That is
+  // the price of the buffer: cheap playback, expensive navigation. Pause while
+  // they come back so the user never watches a half-drawn loop, then resume if
+  // that is what they were doing.
+  radarMap.on('movestart zoomstart', () => {
+    if (radarPlaying) { radarResume = true; radarTogglePlay(); }
+  });
+
+  radarBuildLayers();
+  radarUpdateWarmup();
 
   // Open on the newest observation, never on a forecast frame
   radarShowFrame(RADAR_NOW_IDX);
