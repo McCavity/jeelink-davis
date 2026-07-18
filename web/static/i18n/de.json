@@ -108,6 +108,8 @@
     "play":        "▶ Play",
     "pause":       "⏸ Pause",
     "now":         "Jetzt",
+    "observed":    "Beobachtung",
+    "forecast":    "Vorhersage",
     "source":      "Quelle: DWD Open Data",
     "frame":       "Bild"
   },
