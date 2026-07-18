@@ -1610,7 +1610,8 @@ let radarInitDone  = false;
 let radarLocation  = null; // {lat, lon}
 
 function radarBuildFrames() {
-  // DWD RX-Produkt is available with ~10 min lag, rounded to 5-min grid
+  // DWD radar composite is available with ~5 min lag; we allow 10 min and
+  // round down to the 5-min grid the WMS time dimension is published on
   const now  = new Date();
   const lag  = 10 * 60 * 1000;
   const snap = 5  * 60 * 1000;
@@ -1623,9 +1624,11 @@ function radarBuildFrames() {
 }
 
 function radarFormatTime(iso) {
+  // Frame timestamps are UTC; toLocaleTimeString renders them in the viewer's
+  // zone. Show local time with no suffix — same as every other clock on the page.
   const d = new Date(iso);
   return d.toLocaleTimeString(currentLang === 'de' ? 'de-DE' : 'en-GB',
-    { hour: '2-digit', minute: '2-digit', hour12: false }) + ' UTC';
+    { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 function radarShowFrame(idx) {
@@ -1640,7 +1643,7 @@ function radarShowFrame(idx) {
   if (radarMap && radarFrames.length) {
     if (radarLayer) radarMap.removeLayer(radarLayer);
     radarLayer = L.tileLayer.wms(DWD_WMS, {
-      layers:      'dwd:RX-Produkt',
+      layers:      'dwd:Radar_wn-analysis_1x1km_ger',
       format:      'image/png',
       transparent: true,
       opacity:     0.65,
