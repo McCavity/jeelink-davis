@@ -59,44 +59,89 @@ def layer_from_dashboard() -> str:
     return match.group(1)
 
 
-def dashboard_timestamp() -> str:
-    """Baut denselben Zeitstempel wie radarBuildFrames() im Dashboard."""
-    now = datetime.now(timezone.utc)
-    base = now - timedelta(minutes=10)
-    base = base.replace(minute=base.minute - base.minute % 5, second=0, microsecond=0)
-    return base.strftime("%Y-%m-%dT%H:%M:%SZ")
+def const_from_dashboard(name: str) -> int:
+    """Liest eine RADAR_*-Konstante aus dem ausgelieferten HTML."""
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    match = re.search(rf"const\s+{name}\s*=\s*(\d+)", html)
+    if not match:
+        sys.exit(f"FEHLER: Konstante {name} nicht in {INDEX_HTML} gefunden")
+    return int(match.group(1))
+
+
+def dashboard_base() -> datetime:
+    """Baut denselben Anker wie radarBuildFrames() im Dashboard."""
+    base = datetime.now(timezone.utc) - timedelta(minutes=10)
+    return base.replace(minute=base.minute - base.minute % 5, second=0, microsecond=0)
+
+
+def stamp(moment: datetime) -> str:
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def time_extent_end(caps: str, layer: str) -> datetime | None:
+    """Liest das Ende der time-Dimension des Layers aus den GetCapabilities.
+
+    Der Horizont muss aus den Capabilities kommen, nicht aus dem Bildinhalt:
+    Jenseits des Horizonts liefert der DWD ein leeres PNG mit HTTP 200 — und
+    das ist von "es regnet gerade nirgends" per Pixel nicht zu unterscheiden.
+    """
+    import xml.etree.ElementTree as ET
+
+    wms = "{http://www.opengis.net/wms}"
+    bare = layer.split(":", 1)[-1]
+    for node in ET.fromstring(caps).iter(f"{wms}Layer"):
+        name = node.find(f"{wms}Name")
+        if name is None or name.text != bare:
+            continue
+        for dim in node.findall(f"{wms}Dimension"):
+            if dim.get("name") != "time" or not (dim.text or "").strip():
+                continue
+            end = (dim.text or "").strip().split("/")[1]
+            return datetime.fromisoformat(end.replace("Z", "+00:00"))
+    return None
 
 
 def main() -> int:
     layer = layer_from_dashboard()
-    stamp = dashboard_timestamp()
+    base = dashboard_base()
+    horizon = base + timedelta(minutes=5 * const_from_dashboard("RADAR_FUTURE"))
     print(f"Layer laut Dashboard : {layer}")
-    print(f"Prüf-Zeitstempel     : {stamp}")
+    print(f"Jetzt-Frame          : {stamp(base)}")
+    print(f"Fernster Frame       : {stamp(horizon)}")
 
     status, _, body = fetch(f"{WMS}?service=WMS&version=1.3.0&request=GetCapabilities")
     if status != 200:
         print(f"WARNUNG: GetCapabilities nicht erreichbar (HTTP {status}) — Prüfung unvollständig")
         return 1
+    caps = body.decode("utf-8", "replace")
     bare = layer.split(":", 1)[-1]
-    in_caps = f"<Name>{bare}</Name>" in body.decode("utf-8", "replace")
+    in_caps = f"<Name>{bare}</Name>" in caps
     print(f"In GetCapabilities   : {'ja' if in_caps else 'NEIN'}")
+
+    end = time_extent_end(caps, layer) if in_caps else None
+    reaches = end is not None and end >= horizon
+    if end is None:
+        print("DWD-Horizont         : keine time-Dimension gefunden")
+    else:
+        print(f"DWD-Horizont         : bis {stamp(end)} — "
+              f"{'deckt den fernsten Frame' if reaches else 'ZU KURZ für den fernsten Frame'}")
 
     getmap = (
         f"{WMS}?service=WMS&version=1.1.1&request=GetMap&layers={layer}"
         "&format=image/png&transparent=true&srs=EPSG:3857"
         "&bbox=626172,6261722,1252344,6887895&width=256&height=256"
-        f"&time={stamp}"
+        f"&time={stamp(base)}"
     )
     status, ctype, body = fetch(getmap)
     is_png = body[:8] == b"\x89PNG\r\n\x1a\n"
-    print(f"GetMap               : HTTP {status}, {ctype}, {len(body)} Bytes, PNG={is_png}")
+    print(f"GetMap (Jetzt-Frame) : HTTP {status}, {ctype}, {len(body)} Bytes, PNG={is_png}")
 
-    if in_caps and status == 200 and is_png:
-        print("\n=> OK — der Radar-Layer trägt.")
+    if in_caps and reaches and status == 200 and is_png:
+        print("\n=> OK — Layer und Vorhersage-Horizont tragen.")
         return 0
 
     print(
-        "\n=> FEHLER — das Regenradar bleibt leer.\n"
+        "\n=> FEHLER — das Regenradar bleibt leer oder die Vorhersage reicht nicht.\n"
         "   Aktuell verfügbare Radar-Layer beim DWD abfragen mit:\n"
         f"   curl -s -A '<browser-ua>' '{WMS}?service=WMS&version=1.3.0&request=GetCapabilities'"
         " | grep -o '<Name>[^<]*adar[^<]*</Name>'"

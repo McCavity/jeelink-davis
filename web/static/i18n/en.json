@@ -108,6 +108,8 @@
     "play":        "▶ Play",
     "pause":       "⏸ Pause",
     "now":         "Now",
+    "observed":    "Observed",
+    "forecast":    "Forecast",
     "source":      "Source: DWD Open Data",
     "frame":       "Frame"
   },

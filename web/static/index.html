@@ -451,11 +451,19 @@
         <span data-i18n="radar.source" class="text-xs text-slate-700">Source: DWD Open Data</span>
       </div>
 
-      <!-- Frame scrubber -->
-      <div class="flex items-center gap-2 mb-3">
-        <input id="radar-scrubber" type="range" min="0" max="11" value="11"
+      <!-- Frame scrubber — observed frames left of the now mark, nowcast right -->
+      <div class="flex items-center gap-2 mb-1">
+        <input id="radar-scrubber" type="range" min="0" max="23" value="11"
                style="flex:1;accent-color:rgb(56,189,248)"
                oninput="radarScrub(parseInt(this.value))">
+      </div>
+      <div class="flex mb-1" style="height:3px;border-radius:2px;overflow:hidden">
+        <div id="radar-scale-past"   style="background:rgb(56,189,248)"></div>
+        <div id="radar-scale-future" style="background:rgb(148,163,184);opacity:0.45"></div>
+      </div>
+      <div class="flex mb-3 text-xs text-slate-700">
+        <span id="radar-label-past"   data-i18n="radar.observed">Observed</span>
+        <span id="radar-label-future" data-i18n="radar.forecast" style="text-align:right">Forecast</span>
       </div>
 
       <!-- Map -->
@@ -1596,14 +1604,17 @@ function connectSSE() {
 
 // ── Radar ──────────────────────────────────────────────────────────────────
 const DWD_WMS      = 'https://maps.dwd.de/geoserver/dwd/wms';
-const RADAR_FRAMES = 12;   // 12 × 5 min = 60 min history
+const RADAR_PAST    = 12;  // observed frames 5 min apart — 55 min of history
+const RADAR_FUTURE  = 12;  // nowcast frames 5 min apart — 60 min ahead
+const RADAR_FRAMES  = RADAR_PAST + RADAR_FUTURE;
+const RADAR_NOW_IDX = RADAR_PAST - 1;  // last observed frame — the honest "now"
 const RADAR_FPS    = 600;  // ms per frame
 
 let radarMap       = null;
 let radarLayer     = null;
 let radarMarker    = null;
 let radarFrames    = [];   // UTC ISO strings for each frame
-let radarIdx       = RADAR_FRAMES - 1;
+let radarIdx       = RADAR_NOW_IDX;
 let radarPlaying   = false;
 let radarTimer     = null;
 let radarInitDone  = false;
@@ -1611,14 +1622,17 @@ let radarLocation  = null; // {lat, lon}
 
 function radarBuildFrames() {
   // DWD radar composite is available with ~5 min lag; we allow 10 min and
-  // round down to the 5-min grid the WMS time dimension is published on
+  // round down to the 5-min grid the WMS time dimension is published on.
+  // `base` is therefore the most recent *observed* frame — that is what we
+  // label "now", not the wall clock. Forecast frames run from base onwards;
+  // the RV product publishes up to +120 min, so +60 leaves ample headroom.
   const now  = new Date();
   const lag  = 10 * 60 * 1000;
   const snap = 5  * 60 * 1000;
   const base = new Date(Math.floor((now - lag) / snap) * snap);
   const frames = [];
-  for (let i = RADAR_FRAMES - 1; i >= 0; i--) {
-    frames.push(new Date(base - i * snap).toISOString().replace('.000', ''));
+  for (let i = -RADAR_NOW_IDX; i < RADAR_FRAMES - RADAR_NOW_IDX; i++) {
+    frames.push(new Date(base.getTime() + i * snap).toISOString().replace('.000', ''));
   }
   return frames;
 }
@@ -1635,15 +1649,18 @@ function radarShowFrame(idx) {
   radarIdx = idx;
   document.getElementById('radar-scrubber').value = idx;
 
-  const ts  = radarFrames[idx];
-  const isLast = idx === radarFrames.length - 1;
-  document.getElementById('radar-timestamp').textContent =
-    radarFormatTime(ts) + (isLast ? '  (' + tr('radar.now', 'Now') + ')' : '');
+  const ts = radarFrames[idx];
+  let tag = '';
+  if      (idx === RADAR_NOW_IDX) tag = '  (' + tr('radar.now', 'Now') + ')';
+  else if (idx >   RADAR_NOW_IDX) tag = '  (' + tr('radar.forecast', 'Forecast') + ')';
+  document.getElementById('radar-timestamp').textContent = radarFormatTime(ts) + tag;
 
   if (radarMap && radarFrames.length) {
     if (radarLayer) radarMap.removeLayer(radarLayer);
     radarLayer = L.tileLayer.wms(DWD_WMS, {
-      layers:      'dwd:Radar_wn-analysis_1x1km_ger',
+      // RV product covers observations *and* nowcast in one layer, so the
+      // colour scale stays consistent across the now boundary
+      layers:      'dwd:Radar_rv_product_1x1km_ger',
       format:      'image/png',
       transparent: true,
       opacity:     0.65,
@@ -1713,8 +1730,17 @@ async function initRadar() {
   radarMarker = L.marker([lat, lon], { icon }).addTo(radarMap);
   radarMarker.bindTooltip(tr('cards.temperature', 'Station'), { permanent: false });
 
-  // Show latest frame, pausiert starten
-  radarShowFrame(radarFrames.length - 1);
+  // Scrubber and the scale beneath it derive from the frame constants, so the
+  // markup never drifts out of sync with them
+  const scrubber = document.getElementById('radar-scrubber');
+  scrubber.max = RADAR_FRAMES - 1;
+  document.getElementById('radar-scale-past').style.flex   = RADAR_PAST;
+  document.getElementById('radar-scale-future').style.flex = RADAR_FUTURE;
+  document.getElementById('radar-label-past').style.flex   = RADAR_PAST;
+  document.getElementById('radar-label-future').style.flex = RADAR_FUTURE;
+
+  // Open on the newest observation, never on a forecast frame
+  radarShowFrame(RADAR_NOW_IDX);
 }
 
 // ── Refresh solar at midnight, forecast every 30 min, today stats every 60 s,
