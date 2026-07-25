@@ -2,7 +2,7 @@
 # install-console.sh — optional kiosk display for the touch console.
 #
 # Run from the repository root on the machine with the touch panel attached:
-#   sudo ./install-console.sh [--lang de] [--rotate 270] [--output DSI-1]
+#   sudo ./install-console.sh [--lang de] [--rotate 90] [--output DSI-1]
 #
 # Separate from deploy.sh on purpose: a touch display is optional hardware,
 # and an installation without one must not be asked to install a kiosk.
@@ -22,7 +22,11 @@ SERVICE_USER=davis
 SERVICE_FILE=weather-console.service
 CONSOLE_STATE_DIR=/var/lib/weather-console
 LANG_CODE=en
-ROTATE=270
+# Verified on the target hardware: 90 is correct for this panel and its
+# mounting. The previous default (270) was carried over from the text
+# console's fbcon rotation setting and turned out to be 180° off — the
+# image appeared upside down.
+ROTATE=90
 OUTPUT=DSI-1
 
 while [[ $# -gt 0 ]]; do
@@ -58,13 +62,19 @@ if [[ ! "$LANG_CODE" =~ ^[A-Za-z-]{2,10}$ ]]; then
     exit 1
 fi
 
-# --rotate goes verbatim into a generated autostart shell script; keep it to
-# a transform value wlr-randr actually accepts, not just "not empty".
+# --rotate goes verbatim into a generated autostart shell script, and it also
+# selects the libinput touch calibrationMatrix written below — labwc does not
+# rotate touch input with the output transform (its own manual: "To rotate
+# touch events with output rotation, use the libinput calibrationMatrix
+# setting"), so the two must be derived from the same value or the image and
+# the touch surface end up rotated against each other. Restricted to the four
+# plain rotations wlr-randr and the calibration-matrix derivation below both
+# understand — the flipped-* transforms have no corresponding matrix here.
 case "$ROTATE" in
-    0|90|180|270|normal|flipped|flipped-90|flipped-180|flipped-270) ;;
+    0|90|180|270) ;;
     *)
-        echo "ERROR: --rotate '$ROTATE' is not a valid wlr-randr transform." >&2
-        echo "  Valid values: 0 90 180 270 normal flipped flipped-90 flipped-180 flipped-270" >&2
+        echo "ERROR: --rotate '$ROTATE' is not a valid rotation." >&2
+        echo "  Valid values: 0 90 180 270" >&2
         exit 1
         ;;
 esac
@@ -192,6 +202,36 @@ wlr-randr --output $OUTPUT --transform $ROTATE &
 EOF
 chown "$SERVICE_USER:$SERVICE_USER" "$CONSOLE_STATE_DIR/.config/labwc/autostart"
 chmod +x "$CONSOLE_STATE_DIR/.config/labwc/autostart"
+
+# labwc does not rotate touch input along with the output transform above —
+# its manual says so explicitly ("To rotate touch events with output
+# rotation, use the libinput calibrationMatrix setting"). Without this, a
+# rotated image and an unrotated touch surface disagree about where the
+# screen's corners are: taps land on the wrong part of the display. The
+# matrix is derived from $ROTATE rather than hardcoded, so the script stays
+# correct if the panel is ever mounted a different way. Only the 90 case
+# below has actually been verified on real hardware (reproduced the
+# mismatch, fixed it by hand with this exact matrix, then confirmed the
+# leftmost/rightmost page dots select the first/last page); 0/180/270 follow
+# from the same rotation-matrix derivation and carry that reasoning, not
+# independent verification.
+case "$ROTATE" in
+    0)   CALIBRATION_MATRIX="1 0 0 0 1 0" ;;
+    90)  CALIBRATION_MATRIX="0 -1 1 1 0 0" ;;   # verified on real hardware
+    180) CALIBRATION_MATRIX="-1 0 1 0 -1 1" ;;
+    270) CALIBRATION_MATRIX="0 1 0 -1 0 1" ;;
+esac
+cat > "$CONSOLE_STATE_DIR/.config/labwc/rc.xml" <<EOF
+<?xml version="1.0"?>
+<labwc_config>
+  <libinput>
+    <device category="touch">
+      <calibrationMatrix>$CALIBRATION_MATRIX</calibrationMatrix>
+    </device>
+  </libinput>
+</labwc_config>
+EOF
+chown "$SERVICE_USER:$SERVICE_USER" "$CONSOLE_STATE_DIR/.config/labwc/rc.xml"
 
 # Belt and braces: an installation from before this fix (or one interrupted
 # partway through) can already have part of this tree owned by root. This

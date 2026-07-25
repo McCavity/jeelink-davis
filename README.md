@@ -31,7 +31,7 @@ internet disconnected.
 To run it full-screen on the machine itself, as an optional kiosk display:
 
 ```bash
-sudo ./install-console.sh --lang en --rotate 270
+sudo ./install-console.sh --lang en --rotate 90
 ```
 
 This installs `labwc` (Wayland compositor), `chromium`, `seatd`, `curl`
@@ -41,9 +41,11 @@ enables `seatd.service` — a small seat-management daemon that lets the
 service user reach the GPU and touch input without a login session or root.
 It also adds the service user to group `video` (so `vcgencmd` can report
 throttling) and to whichever group `seatd` created for seat access on that
-system, configures the display rotation, and enables
-`weather-console.service`. `deploy.sh` is unaffected — the kiosk is optional,
-touch hardware is not assumed.
+system, configures the display rotation together with a matching libinput
+touch calibration matrix (labwc does not rotate touch input along with the
+output transform on its own), and enables `weather-console.service`.
+`deploy.sh` is unaffected — the kiosk is optional, touch hardware is not
+assumed.
 
 Design notes: `docs/specs/2026-07-25-touch-console-design.md`.
 
