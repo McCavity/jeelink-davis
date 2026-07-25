@@ -59,10 +59,56 @@ const PAGES = [
             '', { style: 'flex:1' })}
         </div>`;
     } },
-  { id: 'rain',   title: 'Rain',        age: 'outdoor', render: root => { root.innerHTML = '<div class="tile" style="flex:1"><div class="lbl">Rain</div></div>'; } },
+  { id: 'rain', title: 'Rain', age: 'outdoor', render: (root, s) => {
+      const o = s.outdoor || {}, td = s.today || {}, tot = s.rainTotals || {};
+      // rain_secs is the interval between the last two tips; -1 means "no tip
+      // since the service started", which is empty, not broken.
+      const rate = o.rain_secs > 0 ? 720 / o.rain_secs : 0;
+      const since = o.rain_secs > 0 ? humanElapsed(o.rain_secs * 1000, tr) : '—';
+      root.innerHTML = `
+        <div class="col" style="flex:1">
+          <div class="tile" style="flex:0 0 250px">
+            <div class="lbl">${tr('cards.rain_rate_label', 'Rain rate')}</div>
+            <div class="row" style="margin-top:10px">
+              <span class="huge blue value" style="font-size:150px">${fmt(rate, 1)}<span class="unit">mm/h</span></span>
+              <span style="flex:1"></span>
+              <span style="text-align:right">
+                <span class="lbl">${tr('cards.rain_last_tip', 'Last tip')}</span>
+                <div class="big slate value" style="font-size:64px">${since}</div>
+              </span>
+            </div>
+          </div>
+          <div class="grid4" style="flex:1">
+            ${tile(tr('cards.rain_today_label', 'Today'), `<span class="big blue">${fmt(td.rain_mm, 1)}</span>`, 'mm', { cls: 'ctr' })}
+            ${tile(tr('cards.rain_week', 'Week'),        `<span class="big blue">${fmt(tot.week_mm, 1)}</span>`, 'mm', { cls: 'ctr' })}
+            ${tile(tr('cards.rain_month', 'Month'),      `<span class="big blue">${fmt(tot.month_mm, 1)}</span>`, 'mm', { cls: 'ctr' })}
+            ${tile(tr('cards.rain_year', 'Year'),        `<span class="big blue">${fmt(tot.year_mm, 1)}</span>`, 'mm', { cls: 'ctr' })}
+          </div>
+        </div>`;
+    } },
   { id: 'wind',   title: 'Wind',        age: 'outdoor', render: root => { root.innerHTML = '<div class="tile" style="flex:1"><div class="lbl">Wind</div></div>'; } },
   { id: 'sun',    title: 'Sun & moon',  age: 'outdoor', render: root => { root.innerHTML = '<div class="tile" style="flex:1"><div class="lbl">Sun</div></div>'; } },
-  { id: 'indoor', title: 'Indoor',      age: 'indoor',  render: root => { root.innerHTML = '<div class="tile" style="flex:1"><div class="lbl">Indoor</div></div>'; } },
+  { id: 'indoor', title: 'Indoor', age: 'indoor', render: (root, s) => {
+      const i = s.indoor || {};
+      root.innerHTML = `
+        <div class="col" style="flex:1">
+          <div class="tile" style="flex:1">
+            <div class="lbl">${tr('cards.indoor_temp', 'Indoor temp.')}</div>
+            <div class="huge orange value" style="font-size:172px;margin-top:10px">${fmt(i.temperature, 1)}<span class="unit">°C</span></div>
+          </div>
+        </div>
+        <div class="col" style="flex:1">
+          <div class="tile" style="flex:1">
+            <div class="lbl">${tr('cards.indoor_humidity', 'Indoor humidity')}</div>
+            <div class="huge cyan value" style="font-size:172px;margin-top:10px">${fmt(i.humidity, 0)}<span class="unit">%</span></div>
+            <div class="bar"><i style="width:${i.humidity ?? 0}%;background:#0e7490"></i></div>
+          </div>
+          ${tile(tr('cards.pressure', 'Pressure'),
+            `<div class="row"><span class="med violet">${fmt(i.pressure, 1)}<span class="unit-s">hPa</span></span>
+             <span class="sub violet">${TREND_ARROWS[i.pressure_trend] || TREND_ARROWS.unknown}</span></div>`,
+            '', { style: 'flex:0 0 150px' })}
+        </div>`;
+    } },
   { id: 'status', title: 'Status',      age: 'outdoor', render: root => { root.innerHTML = '<div class="tile" style="flex:1"><div class="lbl">Status</div></div>'; } },
   { id: 'system', title: 'System',      age: 'system',  render: root => { root.innerHTML = '<div class="tile" style="flex:1"><div class="lbl">System</div></div>'; } },
 ];
