@@ -68,13 +68,29 @@ hardware; an installation without one must not be asked to install a kiosk.
 
 ### 4.2 The shared core
 
-Moving to `weather-core.js`, unchanged in behaviour except where noted:
+Reading the existing code changed this section. Not everything on the original
+list is pure: four functions reach into module state or return Tailwind class
+names, and one front end has no Tailwind. The extraction therefore splits three
+ways.
 
-`calcDewPoint`, `calcFeelsLike`, `degToCompass`, `formatBearing` (new),
-`moonEmoji`, `moonPhaseName`, `rssiPct`, `rssiColor`, `fmt`, `timeOf`,
-`humanElapsed`, `TREND_ARROWS`, `COMPASS`, `RAIN_ACTIVE_SECS`.
+**Move unchanged** — genuinely pure: `calcDewPoint`, `calcFeelsLike`, `fmt`,
+`rssiPct`, `lerpHex`, `tempColorHex`, `TEMP_COLOR_STOPS`, `moonEmoji`,
+`TREND_ARROWS`, `RAIN_ACTIVE_SECS`.
 
-Two of these change behaviour for **both** front ends:
+**Move with a signature change** — these depend on the caller's language, which
+the core must not own:
+
+| Before | After | Why |
+|---|---|---|
+| `degToCompass(deg)` | `degToCompass(deg, lang)` | reads the module-level `COMPASS` |
+| `moonPhaseName(phase)` | `moonPhaseKey(phase)` returning e.g. `'waxing_gibbous'` | called `tr()` internally; the caller now translates |
+| `humanElapsed(ms)` | `humanElapsed(ms, tr)` | same — the translator is passed in |
+| `timeOf(iso)` | `timeOf(iso, locale)` | had `'de-DE'` hard-coded |
+
+**Stay in the dashboard** — Tailwind-specific, meaningless to the console:
+`rssiColor`, `tempColor`, `TREND_COLORS`.
+
+Plus two additions that change behaviour for **both** front ends:
 
 - **`COMPASS` becomes language-aware.** It is currently a hard-coded English
   array, so the dashboard shows `ENE` even in German mode. German uses `O` for
@@ -84,8 +100,10 @@ Two of these change behaviour for **both** front ends:
   convention in which north is spoken as "three-six-zero". Applies to the wind
   rose card, its centre readout and the dashboard.
 
-The extraction is mechanical: move the function, delete the original, add the
-`<script>` tag. No rewrites, no signature changes beyond the two above.
+An earlier draft called the extraction "mechanical: move, delete, add a script
+tag". Reading the code disproved that for the four functions in the table
+above, so each of their call sites in the dashboard has to be updated too. The
+rest is mechanical. No function gains new behaviour.
 
 ### 4.3 Data flow
 
