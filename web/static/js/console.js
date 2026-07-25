@@ -24,6 +24,12 @@ const state = {
   indoor: null,  indoorAt: null,
   today: null, rainTotals: null, solar: null, system: null, systemAt: null,
   windSamples: [],       // [{ t, v }] for the 10-minute mean
+  windAt: null,          // timestamp of the last reading that actually carried
+                          // wind data — outdoorAt advances on every partial
+                          // outdoor packet (temperature-only, humidity-only,
+                          // ...), so it is almost always fresh even hours into
+                          // a real wind outage; windAt only advances when the
+                          // anemometer itself reported.
   connected: false,
   lastTipAt: null,       // wall-clock ms of the last rain_tip_count increase;
                           // in-memory only — unknown again after a restart.
@@ -95,22 +101,29 @@ const PAGES = [
   { id: 'wind', title: 'Wind', age: 'outdoor', render: (root, s) => {
       const o = s.outdoor || {}, td = s.today || {};
       const mean = meanOver(s.windSamples, 600_000, Date.now());
-      const ageMs = s.outdoorAt == null ? null : Date.now() - s.outdoorAt;
+      // Both the pointer state's age and the note are keyed off windAt, not
+      // outdoorAt — outdoorAt advances on every partial outdoor packet
+      // (temperature-only, humidity-only, ...), so it stays fresh even hours
+      // into a real wind outage and would otherwise print "no data since"
+      // the current time, forever, hiding exactly the fault this state
+      // exists to surface. windAt only advances on a packet that actually
+      // carried wind_direction or wind_speed.
+      const ageMs = s.windAt == null ? null : Date.now() - s.windAt;
       const pointerState = windPointerState(mean, ageMs);
       // The rose itself stays a pure SVG builder (buildRose) — it has no
       // clock and no translator. Whether there is a "since HH:MM" to show,
       // and what words surround it, are both caller concerns: this render()
-      // already has state.outdoorAt and tr() in scope, buildRose has neither.
+      // already has state.windAt and tr() in scope, buildRose has neither.
       let note = '';
       if (pointerState === 'calm') {
         note = tr('console.calm', 'calm');
       } else if (pointerState === 'stale') {
-        // outdoorAt itself can be null (no outdoor packet ever seen) — there
-        // is then no timestamp to report a "since" against, so fall back to
+        // windAt itself can be null (no wind reading ever seen) — there is
+        // then no timestamp to report a "since" against, so fall back to
         // the plain no_data wording instead of stamping a fabricated time.
-        note = s.outdoorAt == null
+        note = s.windAt == null
           ? tr('console.no_data', 'no data')
-          : `${tr('console.no_data_since', 'no data since')} ${timeOf(new Date(s.outdoorAt).toISOString(), LOCALE)}`;
+          : `${tr('console.no_data_since', 'no data since')} ${timeOf(new Date(s.windAt).toISOString(), LOCALE)}`;
       }
       root.innerHTML = `
         <div class="tile ctr rose-tile" style="flex:0 0 600px;padding:6px"></div>
@@ -556,6 +569,18 @@ function applyOutdoorReading(d, at) {
   // tipped from a snapshot alone.
   if (isNewTip(prevTipCount, d.rain_tip_count)) {
     state.lastTipAt = at;
+  }
+  // windAt only advances when this packet actually carries wind data — most
+  // outdoor packets don't (temperature-only, humidity-only, ...), and must
+  // not make a silent anemometer look freshly reporting. Stamped with the
+  // same `at` the function was given, never Date.now(): the seed path passes
+  // the snapshot's own timestamp precisely so old data can't present itself
+  // as fresh, and windAt must inherit that property rather than reset it. If
+  // `at` is null (unparseable seed timestamp), windAt becomes null too — the
+  // same "unknown age" convention outdoorAt already follows — rather than
+  // silently keeping a stale previous value.
+  if (d.wind_direction != null || d.wind_speed != null) {
+    state.windAt = at;
   }
   // A wind sample is worth seeding too, so the wind page doesn't show a grey
   // (stale) pointer for the first few seconds — but only when `at` is known;
