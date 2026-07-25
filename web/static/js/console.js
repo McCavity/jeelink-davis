@@ -86,7 +86,25 @@ const PAGES = [
           </div>
         </div>`;
     } },
-  { id: 'wind',   title: 'Wind',        age: 'outdoor', render: root => { root.innerHTML = '<div class="tile" style="flex:1"><div class="lbl">Wind</div></div>'; } },
+  { id: 'wind', title: 'Wind', age: 'outdoor', render: (root, s) => {
+      const o = s.outdoor || {}, td = s.today || {};
+      const mean = meanOver(s.windSamples, 600_000, Date.now());
+      const ageMs = s.outdoorAt == null ? null : Date.now() - s.outdoorAt;
+      root.innerHTML = `
+        <div class="tile ctr rose-tile" style="flex:0 0 600px;padding:6px"></div>
+        <div class="col" style="flex:1">
+          <div class="tile" style="flex:1">
+            <div class="lbl">${tr('cards.wind_speed', 'Speed')}</div>
+            <div class="huge sky value" style="font-size:150px;margin-top:8px">${fmt(o.wind_speed, 1)}<span class="unit">m/s</span></div>
+          </div>
+          <div class="grid2" style="flex:0 0 200px">
+            ${tile(tr('cards.gust', 'Gust'), `<span class="big sky">${fmt(o.wind_gust, 1)}</span>`, 'm/s')}
+            ${tile(tr('cards.gust_max_today', 'Max today'), `<span class="big rose">${fmt(td.wind_gust_max, 1)}</span>`, 'm/s')}
+          </div>
+        </div>`;
+      root.querySelector('.rose-tile').appendChild(
+        buildRose(o.wind_direction, windPointerState(mean, ageMs), LANG));
+    } },
   { id: 'sun',    title: 'Sun & moon',  age: 'outdoor', render: root => { root.innerHTML = '<div class="tile" style="flex:1"><div class="lbl">Sun</div></div>'; } },
   { id: 'indoor', title: 'Indoor', age: 'indoor', render: (root, s) => {
       const i = s.indoor || {};
@@ -230,6 +248,91 @@ function tile(label, body, sub, opts = {}) {
     <div class="value">${body}</div>
     ${sub ? `<div class="sub-d value">${sub}</div>` : ''}
   </div>`;
+}
+
+// ── Wind rose ──────────────────────────────────────────────────────────────
+// Two concentric scales, as on a real compass card: an outer degree scale
+// (1° / 5° / 10°) and an inner point scale (22.5° / 45° / 90°). A single ring
+// cannot carry both, because 22.5 is never a multiple of 10.
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function svgEl(name, attrs) {
+  const e = document.createElementNS(SVG_NS, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+function polar(r, deg) {
+  const a = (deg - 90) * Math.PI / 180;
+  return [300 + r * Math.cos(a), 300 + r * Math.sin(a)];
+}
+
+const POINTER_COLORS = { live: '#38bdf8', calm: '#f87171', stale: '#475569' };
+
+function buildRose(dir, pointerState, lang) {
+  const col = POINTER_COLORS[pointerState];
+  const svg = svgEl('svg', { viewBox: '0 0 600 600', width: 560, height: 560, 'aria-hidden': 'true' });
+
+  for (let d = 0; d < 360; d++) {
+    const major = d % 10 === 0, mid = d % 5 === 0;
+    const [x1, y1] = polar(246, d);
+    const [x2, y2] = polar(major ? 230 : mid ? 236 : 240, d);
+    svg.appendChild(svgEl('line', { x1, y1, x2, y2,
+      stroke: major ? '#64748b' : mid ? '#334155' : '#243247', 'stroke-width': major ? 2 : 1 }));
+    if (major) {
+      const [lx, ly] = polar(213, d);
+      const flip = d > 90 && d < 270;
+      const label = svgEl('text', { x: lx, y: ly, fill: '#64748b', 'font-size': 17,
+        'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-family': 'ui-monospace, monospace',
+        transform: `rotate(${d + (flip ? 180 : 0)} ${lx} ${ly})` });
+      label.textContent = formatBearing(d).replace('°', '');   // north reads 360
+      svg.appendChild(label);
+    }
+  }
+
+  for (let i = 0; i < 16; i++) {
+    const a = i * 22.5, cardinal = i % 4 === 0, ordinal = i % 4 === 2;
+    const [x1, y1] = polar(196, a);
+    const [x2, y2] = polar(cardinal ? 166 : ordinal ? 174 : 181, a);
+    svg.appendChild(svgEl('line', { x1, y1, x2, y2,
+      stroke: cardinal ? '#e2e8f0' : ordinal ? '#94a3b8' : '#64748b',
+      'stroke-width': cardinal ? 3 : ordinal ? 2 : 1.5, 'stroke-linecap': 'round' }));
+    if (cardinal || ordinal) {
+      const [tx, ty] = polar(cardinal ? 143 : 146, a);
+      const label = svgEl('text', { x: tx, y: ty, fill: cardinal ? '#cbd5e1' : '#94a3b8',
+        'font-size': cardinal ? 30 : 20, 'font-weight': cardinal ? 700 : 500,
+        'text-anchor': 'middle', 'dominant-baseline': 'middle' });
+      label.textContent = WeatherCore.COMPASS[lang === 'de' ? 'de' : 'en'][i];
+      svg.appendChild(label);
+    }
+  }
+
+  svg.appendChild(svgEl('circle', { cx: 300, cy: 300, r: 270, fill: 'none', stroke: '#131c2e', 'stroke-width': 16 }));
+
+  if (dir != null && pointerState !== 'stale') {
+    const [ax, ay] = polar(270, dir - 13), [bx, by] = polar(270, dir + 13);
+    svg.appendChild(svgEl('path', { d: `M${ax} ${ay} A 270 270 0 0 1 ${bx} ${by}`,
+      fill: 'none', stroke: col, 'stroke-width': 16, 'stroke-linecap': 'round' }));
+    const [nx1, ny1] = polar(254, dir), [nx2, ny2] = polar(208, dir);
+    svg.appendChild(svgEl('line', { x1: nx1, y1: ny1, x2: nx2, y2: ny2,
+      stroke: col, 'stroke-width': 4, 'stroke-linecap': 'round' }));
+  }
+
+  const bearing = svgEl('text', { x: 300, y: 286, fill: pointerState === 'stale' ? '#475569' : '#e2e8f0',
+    'font-size': 74, 'text-anchor': 'middle', 'dominant-baseline': 'middle',
+    'font-family': 'ui-monospace, monospace', 'font-weight': 300 });
+  bearing.textContent = pointerState === 'stale' ? '—' : formatBearing(dir);
+  svg.appendChild(bearing);
+
+  const point = svgEl('text', { x: 300, y: 344, fill: col, 'font-size': 40,
+    'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-weight': 600 });
+  point.textContent = pointerState === 'stale' ? '' : degToCompass(dir, lang);
+  svg.appendChild(point);
+
+  const note = svgEl('text', { x: 300, y: 388, fill: '#475569', 'font-size': 21,
+    'text-anchor': 'middle', 'dominant-baseline': 'middle' });
+  note.textContent = pointerState === 'calm' ? tr('console.calm', 'calm') : '';
+  svg.appendChild(note);
+
+  return svg;
 }
 
 // ── Live stream ────────────────────────────────────────────────────────────
