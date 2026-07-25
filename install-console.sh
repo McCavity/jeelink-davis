@@ -123,20 +123,55 @@ if [[ -z "$SEAT_GROUP" ]]; then
 fi
 echo "Using seat group '$SEAT_GROUP' …"
 
-# vcgencmd needs /dev/vcio_gencmd, which udev grants to group 'video'.
-# Without this the System page's throttling tiles stay empty. On systems
-# where seatd's own group *is* 'video' (e.g. Debian 13), that single
-# membership already covers both purposes — add it once, not twice, so
-# usermod isn't called redundantly and the generated unit below doesn't get
-# a duplicated group name.
-if [[ "$SEAT_GROUP" == "video" ]]; then
-    echo "Adding '$SERVICE_USER' to group 'video' (seatd's seat group on this system, also needed for vcgencmd) …"
-    usermod -aG video "$SERVICE_USER"
+# The render node (/dev/dri/renderD128) is a separate device from the
+# card0/card1 nodes seat access covers above, and on a stock Debian install
+# it belongs to a different group ('render'). Without membership in it, the
+# compositor can get seat access but still fails to open the render node
+# and falls back to (or fails at) software rendering. Exactly like
+# SEAT_GROUP above, the group name is a distribution convention, not a
+# guarantee, so read it from the node's actual group owner instead of
+# hardcoding 'render'.
+#
+# Unlike the seat group, a render node is genuinely optional: a machine
+# with no GPU, or one that exposes a differently-named device, still runs
+# the kiosk fine under software rendering — so its absence is a warning,
+# not the fatal abort SEAT_GROUP gets above.
+RENDER_NODE=/dev/dri/renderD128
+RENDER_GROUP=""
+if [[ -e "$RENDER_NODE" ]]; then
+    RENDER_GROUP="$(stat -c '%G' "$RENDER_NODE")"
+    echo "Found $RENDER_NODE, owned by group '$RENDER_GROUP' …"
 else
-    echo "Adding '$SERVICE_USER' to groups 'video' and '$SEAT_GROUP' …"
-    usermod -aG video "$SERVICE_USER"
-    usermod -aG "$SEAT_GROUP" "$SERVICE_USER"
+    echo "WARNING: $RENDER_NODE not found; skipping render-group setup." >&2
+    echo "  The kiosk will still run, falling back to software rendering." >&2
 fi
+
+# vcgencmd needs /dev/vcio_gencmd, which udev grants to group 'video'.
+# Without this the System page's throttling tiles stay empty. video, the
+# seat group and the render group can all turn out to be the same group
+# (e.g. Debian 13, where seatd's group *is* 'video') or pairwise distinct —
+# collect the set of distinct group names first, then add each exactly
+# once, so usermod isn't called redundantly and the generated unit below
+# doesn't get a duplicated group name.
+GROUPS_TO_ADD=(video)
+group_in_list() {
+    local needle="$1"
+    shift
+    local g
+    for g in "$@"; do
+        [[ "$g" == "$needle" ]] && return 0
+    done
+    return 1
+}
+group_in_list "$SEAT_GROUP" "${GROUPS_TO_ADD[@]}" || GROUPS_TO_ADD+=("$SEAT_GROUP")
+if [[ -n "$RENDER_GROUP" ]] && ! group_in_list "$RENDER_GROUP" "${GROUPS_TO_ADD[@]}"; then
+    GROUPS_TO_ADD+=("$RENDER_GROUP")
+fi
+
+echo "Adding '$SERVICE_USER' to group(s): ${GROUPS_TO_ADD[*]} …"
+for group in "${GROUPS_TO_ADD[@]}"; do
+    usermod -aG "$group" "$SERVICE_USER"
+done
 
 echo "Configuring a ${ROTATE}° output transform for $OUTPUT …"
 # This has to live where the unit's HOME/XDG_CONFIG_HOME point (see
@@ -144,23 +179,32 @@ echo "Configuring a ${ROTATE}° output transform for $OUTPUT …"
 # $XDG_CONFIG_HOME/labwc, falling back to $HOME/.config/labwc. davis has no
 # home directory (deploy.sh creates it with --no-create-home), so this uses
 # the same StateDirectory the unit does instead of /home/davis.
+# install -d's -o/-g flags only guarantee ownership for the directories
+# named explicitly as arguments here — GNU install does not propagate them
+# to ancestor directories it has to create implicitly along the way (that
+# is exactly how .config ended up root-owned on real hardware: it was an
+# implicit ancestor of .config/labwc below, not a named argument). Naming
+# .config explicitly closes that gap.
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0700 "$CONSOLE_STATE_DIR"
-install -d -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONSOLE_STATE_DIR/.config/labwc"
+install -d -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONSOLE_STATE_DIR/.config" "$CONSOLE_STATE_DIR/.config/labwc"
 cat > "$CONSOLE_STATE_DIR/.config/labwc/autostart" <<EOF
 wlr-randr --output $OUTPUT --transform $ROTATE &
 EOF
 chown "$SERVICE_USER:$SERVICE_USER" "$CONSOLE_STATE_DIR/.config/labwc/autostart"
 chmod +x "$CONSOLE_STATE_DIR/.config/labwc/autostart"
 
+# Belt and braces: an installation from before this fix (or one interrupted
+# partway through) can already have part of this tree owned by root. This
+# script is meant to be idempotent, so a re-run must repair that, not just
+# avoid making it worse on a fresh install — chown the whole tree
+# unconditionally on every run.
+chown -R "$SERVICE_USER:$SERVICE_USER" "$CONSOLE_STATE_DIR"
+
 echo "Installing systemd service …"
-# When SEAT_GROUP is 'video', the membership above already covers both
-# purposes — write it once here too, so SupplementaryGroups= doesn't end up
-# listing the same group twice (harmless to systemd, but confusing to read).
-if [[ "$SEAT_GROUP" == "video" ]]; then
-    SUPPLEMENTARY_GROUPS="video"
-else
-    SUPPLEMENTARY_GROUPS="video $SEAT_GROUP"
-fi
+# GROUPS_TO_ADD above is already the deduplicated set (video, seat group,
+# and render group where one was found) — reuse it verbatim rather than
+# recomputing which groups the unit needs a second time.
+SUPPLEMENTARY_GROUPS="${GROUPS_TO_ADD[*]}"
 
 # Anchored to the specific directive lines, not a blind whole-file replace:
 # $SERVICE_FILE also *explains* the __SEAT_GROUP__ placeholder in a comment
@@ -177,12 +221,12 @@ echo "Console kiosk installed."
 echo "  systemctl status $SERVICE_FILE"
 echo "  journalctl -u $SERVICE_FILE -f"
 echo ""
-if [[ "$SEAT_GROUP" == "video" ]]; then
-    echo "The service user was added to group 'video' (which also grants seat"
-    echo "access on this system); the restart above already picks that up —"
-else
-    echo "The service user was added to groups 'video' and '$SEAT_GROUP'; the"
-    echo "restart above already picks that up —"
+echo "The service user was added to group(s): ${GROUPS_TO_ADD[*]}; the"
+echo "restart above already picks that up — systemd resolves group"
+echo "membership fresh each time it starts the service, unlike an"
+echo "interactive login session."
+if [[ -z "$RENDER_GROUP" ]]; then
+    echo ""
+    echo "No render node was found, so no render-group membership was added;"
+    echo "the kiosk will run under software rendering."
 fi
-echo "systemd resolves group membership fresh each time it starts the"
-echo "service, unlike an interactive login session."
