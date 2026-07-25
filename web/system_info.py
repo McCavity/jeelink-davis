@@ -89,11 +89,19 @@ def read_system() -> dict:
                     mem_total = int(line.split()[1]) // 1024
                 elif line.startswith("MemAvailable:"):
                     mem_available = int(line.split()[1]) // 1024
-    except OSError:
-        pass
+    except (OSError, IndexError, ValueError):
+        mem_total = mem_available = None
 
-    usage = shutil.disk_usage("/")
+    try:
+        usage = shutil.disk_usage("/")
+    except OSError:
+        usage = None
+
     uptime_line = _read_first_line("/proc/uptime")
+    try:
+        uptime_s = int(float(uptime_line.split()[0])) if uptime_line else None
+    except (IndexError, ValueError):
+        uptime_s = None
 
     throttle_out = _vcgencmd("get_throttled")
     throttle = None
@@ -112,9 +120,9 @@ def read_system() -> dict:
         "cpu_count": os.cpu_count() or 1,
         "mem_total_mb": mem_total,
         "mem_used_mb": (mem_total - mem_available) if (mem_total and mem_available) else None,
-        "disk_total_gb": round(usage.total / 1e9, 1),
-        "disk_used_gb": round(usage.used / 1e9, 1),
-        "uptime_s": int(float(uptime_line.split()[0])) if uptime_line else None,
+        "disk_total_gb": round(usage.total / 1e9, 1) if usage else None,
+        "disk_used_gb": round(usage.used / 1e9, 1) if usage else None,
+        "uptime_s": uptime_s,
         "core_clock_hz": int(clock) if clock else None,
         "core_volts": round(volts, 3) if volts else None,
         "throttle": throttle,
