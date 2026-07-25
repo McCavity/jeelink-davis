@@ -5,6 +5,7 @@ const {
   moonEmoji, moonPhaseKey, MOON_PHASE_EN, TREND_ARROWS,
   rssiPct, dataAgeState, meanOver, windPointerState, calcDewPoint,
   mergeReading, rainRate, isNewTip, parseTimestampMs,
+  localDayStartMs, dayArcPercent,
 } = WeatherCore;
 
 // ── Language ───────────────────────────────────────────────────────────────
@@ -114,25 +115,50 @@ const PAGES = [
       const sol = s.solar;
       if (!sol) { root.innerHTML = `<div class="tile" style="flex:1"><div class="lbl">${tr('console.no_data', 'no data')}</div></div>`; return; }
       const ms = iso => new Date(iso).getTime();
-      const span = ms(sol.dusk) - ms(sol.dawn);
-      const pos = v => span > 0 ? Math.max(0, Math.min(100, ((ms(v) - ms(sol.dawn)) / span) * 100)) : 0;
-      const nowPct = span > 0 ? Math.max(0, Math.min(100, ((Date.now() - ms(sol.dawn)) / span) * 100)) : 0;
+      // The axis is the full local day (00:00-24:00) the solar data
+      // describes, anchored on noon's own date+offset — dawn, sunrise,
+      // sunset and dusk all fall on that same calendar day. A full day is a
+      // constant 24h span (never 0, unlike the old dawn->dusk span), but
+      // dayArcPercent still clamps to 0..100 and never emits NaN for a bad
+      // timestamp, so a malformed reading can't produce style="left:NaN%"
+      // (silently dropped by the browser) — see weather-core.js.
+      const dayStart = localDayStartMs(sol.noon);
+      const pos = iso => dayArcPercent(ms(iso), dayStart);
+      const nowPct = dayArcPercent(Date.now(), dayStart);
       const dayMs = ms(sol.sunset) - ms(sol.sunrise);
       const hhmm = m => `${Math.floor(m / 60)}:${String(Math.round(m % 60)).padStart(2, '0')}`;
-      const marks = [
-        [sol.dawn, '🌒', tr('solar.dawn', 'Dawn')], [sol.sunrise, '🌅', tr('solar.sunrise', 'Sunrise')],
-        [sol.noon, '☀️', tr('solar.noon', 'Noon')], [sol.sunset, '🌇', tr('solar.sunset', 'Sunset')],
-        [sol.dusk, '🌘', tr('solar.dusk', 'Dusk')],
+      // Only sunrise/noon/sunset get a full labelled marker (icon + time +
+      // caption) — on a full-day axis dawn and sunrise sit only ~3% apart
+      // (38px), far narrower than a 150px label box, so they'd overlap.
+      // Dawn and dusk instead become thin unlabelled ticks (see below), and
+      // their times move into the day-length tile's sub-line.
+      const labelled = [
+        [sol.sunrise, '🌅', tr('solar.sunrise', 'Sunrise')],
+        [sol.noon, '☀️', tr('solar.noon', 'Noon')],
+        [sol.sunset, '🌇', tr('solar.sunset', 'Sunset')],
       ];
+      const ticks = [sol.dawn, sol.dusk];
       const key = moonPhaseKey(sol.moon_phase);
+      // Gradient stops follow the real dawn/sunrise/noon/sunset/dusk
+      // positions on the new axis, not fixed percentages tuned for the old
+      // one: night stays dark up to dawn, twilight (dawn->sunrise and
+      // sunset->dusk) is the transition, daylight (sunrise->sunset) is warm
+      // and peaks at noon. Colour values are unchanged from before.
+      const gradient = `linear-gradient(90deg,` +
+        `#1e293b 0%,#1e293b ${pos(sol.dawn)}%,` +
+        `#fbbf24 ${pos(sol.sunrise)}%,#fde68a ${pos(sol.noon)}%,#fb923c ${pos(sol.sunset)}%,` +
+        `#1e293b ${pos(sol.dusk)}%,#1e293b 100%)`;
       root.innerHTML = `
         <div class="col" style="flex:1">
           <div class="tile" style="flex:1">
             <div class="lbl">${tr('console.day_arc', 'Day arc')}</div>
             <div style="position:relative;height:118px;margin:26px 10px 0">
               <div style="position:absolute;top:52px;left:0;right:0;height:5px;border-radius:3px;
-                          background:linear-gradient(90deg,#1e293b 0%,#1e293b 8%,#fbbf24 22%,#fde68a 50%,#fb923c 78%,#1e293b 92%,#1e293b 100%)"></div>
-              ${marks.map(([iso, icon, label]) => `
+                          background:${gradient}"></div>
+              ${ticks.map(iso => `
+                <div style="position:absolute;top:45px;left:${pos(iso)}%;width:2px;height:19px;
+                            background:#64748b;border-radius:1px;transform:translateX(-50%)"></div>`).join('')}
+              ${labelled.map(([iso, icon, label]) => `
                 <div style="position:absolute;top:0;left:${pos(iso)}%;transform:translateX(-50%);width:150px;text-align:center">
                   <div style="font-size:30px;line-height:1">${icon}</div>
                   <div style="font-size:27px;margin-top:26px;font-weight:500;font-variant-numeric:tabular-nums">${timeOf(iso, LOCALE)}</div>
@@ -150,7 +176,8 @@ const PAGES = [
                </div>`, '')}
             ${tile(tr('console.day_length', 'Day length'),
               `<span class="big amber">${hhmm(dayMs / 60000)}<span class="unit-s">h</span></span>`,
-              `${tr('console.until_sunset', 'until sunset')} ${hhmm(Math.max(0, (ms(sol.sunset) - Date.now()) / 60000))}`)}
+              `${tr('console.until_sunset', 'until sunset')} ${hhmm(Math.max(0, (ms(sol.sunset) - Date.now()) / 60000))}<br>` +
+              `${tr('solar.dawn', 'Dawn')} ${timeOf(sol.dawn, LOCALE)} · ${tr('solar.dusk', 'Dusk')} ${timeOf(sol.dusk, LOCALE)}`)}
           </div>
         </div>`;
     } },

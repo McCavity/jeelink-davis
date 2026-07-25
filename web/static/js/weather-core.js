@@ -159,6 +159,33 @@ const WeatherCore = (function () {
     return dbm == null ? 0 : Math.max(0, Math.min(100, ((dbm + 90) / 50) * 100));
   }
 
+  // Local midnight (00:00:00) of the calendar day `iso` describes, in epoch
+  // ms — derived from the ISO string's own date and UTC offset, not the
+  // runtime's timezone. The Sun & moon page's axis is the local day the
+  // solar API described, not whatever zone happens to run the console (or
+  // this test). Returns null when `iso` isn't a recognisable
+  // YYYY-MM-DDThh:mm:ss(.sss)?(Z|+hh:mm) string, so a malformed timestamp
+  // never silently becomes "today" in some other zone.
+  function localDayStartMs(iso) {
+    if (typeof iso !== 'string') return null;
+    const m = /^(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}:\d{2}(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/.exec(iso);
+    if (!m) return null;
+    const dayStart = Date.parse(`${m[1]}T00:00:00${m[2]}`);
+    return Number.isNaN(dayStart) ? null : dayStart;
+  }
+
+  // Position of instant `atMs` on a fixed 24h axis starting at `dayStartMs`,
+  // as a percentage clamped to 0..100. A full day is a constant span (it can
+  // never be zero, unlike the old dawn->dusk span), but the inputs can still
+  // be bad: a missing/unparseable timestamp must render as a safe 0%, never
+  // NaN, because a `style="left:NaN%"` attribute is silently dropped by the
+  // browser and the marker would just vanish instead of clamping visibly.
+  function dayArcPercent(atMs, dayStartMs) {
+    if (atMs == null || dayStartMs == null || Number.isNaN(atMs) || Number.isNaN(dayStartMs)) return 0;
+    const DAY_MS = 24 * 3600 * 1000;
+    return Math.max(0, Math.min(100, ((atMs - dayStartMs) / DAY_MS) * 100));
+  }
+
   function lerpHex(c1, c2, t) {
     const h = s => [parseInt(s.slice(1, 3), 16), parseInt(s.slice(3, 5), 16), parseInt(s.slice(5, 7), 16)];
     const [r1, g1, b1] = h(c1), [r2, g2, b2] = h(c2);
@@ -206,6 +233,7 @@ const WeatherCore = (function () {
     degToCompass, formatBearing, moonEmoji, moonPhaseKey,
     rssiPct, lerpHex, tempColorHex, mergeReading, rainRate, isNewTip,
     dataAgeState, meanOver, windPointerState, parseTimestampMs,
+    localDayStartMs, dayArcPercent,
   };
 })();
 

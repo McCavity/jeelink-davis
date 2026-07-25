@@ -147,3 +147,55 @@ test('parseTimestampMs returns null for missing or unparseable input, not NaN/no
   assert.equal(WC.parseTimestampMs(''), null);
   assert.equal(WC.parseTimestampMs('not-a-date'), null);
 });
+
+// The Sun & moon page's axis is the full local day (00:00-24:00) the solar
+// times describe, not the runtime's own timezone — localDayStartMs derives
+// midnight from the ISO string's own date + offset so the axis is correct
+// regardless of what TZ the console (or this test) happens to run in.
+test('localDayStartMs derives local midnight from the ISO string\'s own date + offset', () => {
+  assert.equal(WC.localDayStartMs('2026-07-25T05:03:00+02:00'), Date.parse('2026-07-25T00:00:00+02:00'));
+  assert.equal(WC.localDayStartMs('2026-07-25T21:59:00+02:00'), Date.parse('2026-07-25T00:00:00+02:00'));
+  assert.equal(WC.localDayStartMs('2026-07-25T00:00:00.000Z'), Date.parse('2026-07-25T00:00:00Z'));
+});
+
+test('localDayStartMs returns null for missing or unparseable input', () => {
+  assert.equal(WC.localDayStartMs(null), null);
+  assert.equal(WC.localDayStartMs(undefined), null);
+  assert.equal(WC.localDayStartMs('not-a-date'), null);
+  assert.equal(WC.localDayStartMs('2026-07-25'), null); // no time/offset part
+});
+
+test('dayArcPercent places today\'s real dawn/sunrise/noon/sunset/dusk within 1pt of the agreed positions', () => {
+  const dayStart = WC.localDayStartMs('2026-07-25T00:00:00+02:00');
+  const pct = iso => WC.dayArcPercent(new Date(iso).getTime(), dayStart);
+  const near = (actual, expected) => assert.ok(Math.abs(actual - expected) <= 1,
+    `expected ${actual} to be within 1 of ${expected}`);
+  near(pct('2026-07-25T05:03:00+02:00'), 21); // dawn
+  near(pct('2026-07-25T05:44:00+02:00'), 24); // sunrise
+  near(pct('2026-07-25T13:31:00+02:00'), 56); // noon
+  near(pct('2026-07-25T21:18:00+02:00'), 89); // sunset
+  near(pct('2026-07-25T21:59:00+02:00'), 92); // dusk
+});
+
+test('dayArcPercent places exact midnight at 0% and 23:59 near 100%', () => {
+  const dayStart = WC.localDayStartMs('2026-07-25T00:00:00+02:00');
+  assert.equal(WC.dayArcPercent(dayStart, dayStart), 0);
+  const almostMidnight = dayStart + (23 * 3600 + 59 * 60) * 1000;
+  assert.ok(Math.abs(WC.dayArcPercent(almostMidnight, dayStart) - 99.93) < 0.01);
+});
+
+test('dayArcPercent never returns NaN for an unparseable or missing timestamp', () => {
+  const dayStart = WC.localDayStartMs('2026-07-25T00:00:00+02:00');
+  assert.equal(WC.dayArcPercent(WC.parseTimestampMs('not-a-date'), dayStart), 0);
+  assert.equal(WC.dayArcPercent(Number.NaN, dayStart), 0);
+  assert.equal(WC.dayArcPercent(null, dayStart), 0);
+  assert.equal(WC.dayArcPercent(undefined, dayStart), 0);
+  assert.equal(WC.dayArcPercent(1000, null), 0);
+  assert.equal(WC.dayArcPercent(1000, Number.NaN), 0);
+});
+
+test('dayArcPercent clamps an instant outside the described day into 0..100', () => {
+  const dayStart = WC.localDayStartMs('2026-07-25T00:00:00+02:00');
+  assert.equal(WC.dayArcPercent(dayStart - 3600_000, dayStart), 0);          // yesterday 23:00
+  assert.equal(WC.dayArcPercent(dayStart + 25 * 3600_000, dayStart), 100);   // tomorrow 01:00
+});
