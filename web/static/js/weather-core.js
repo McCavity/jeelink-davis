@@ -130,6 +130,19 @@ const WeatherCore = (function () {
     return 720 / rainSecs;
   }
 
+  // rain_tip_count is a wrapping 0-127 counter, not a monotonic total (see
+  // web/db.py, which applies the same `+ 128` correction to a negative
+  // delta). A decrease therefore reads as a tip too — either the counter
+  // wrapped past 127, or the station was genuinely reset, and both cases
+  // are a tip having happened since the last known count. prevCount must
+  // be known (not null/undefined) before anything can be reported, so a
+  // fresh boot never guesses a tip into existence; nextCount must also be
+  // present, since null means the field was simply absent from this packet.
+  function isNewTip(prevCount, nextCount) {
+    if (prevCount == null || nextCount == null) return false;
+    return nextCount !== prevCount;
+  }
+
   function rssiPct(dbm) {
     return dbm == null ? 0 : Math.max(0, Math.min(100, ((dbm + 90) / 50) * 100));
   }
@@ -179,7 +192,7 @@ const WeatherCore = (function () {
     RAIN_ACTIVE_SECS, CALM_MEAN_MS, AGE_FRESH_MS, AGE_STALE_MS,
     calcDewPoint, calcFeelsLike, fmt, timeOf, humanElapsed,
     degToCompass, formatBearing, moonEmoji, moonPhaseKey,
-    rssiPct, lerpHex, tempColorHex, mergeReading, rainRate,
+    rssiPct, lerpHex, tempColorHex, mergeReading, rainRate, isNewTip,
     dataAgeState, meanOver, windPointerState,
   };
 })();

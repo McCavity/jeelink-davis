@@ -4,7 +4,7 @@ const {
   fmt, timeOf, humanElapsed, degToCompass, formatBearing,
   moonEmoji, moonPhaseKey, MOON_PHASE_EN, TREND_ARROWS,
   rssiPct, dataAgeState, meanOver, windPointerState, calcDewPoint,
-  mergeReading, rainRate,
+  mergeReading, rainRate, isNewTip,
 } = WeatherCore;
 
 // ── Language ───────────────────────────────────────────────────────────────
@@ -484,7 +484,7 @@ function mergeOutdoor(d) {
   const prevTipCount = state.outdoor ? state.outdoor.rain_tip_count : null;
   state.outdoor = mergeReading(state.outdoor, d);
   state.outdoorAt = Date.now();
-  if (d.rain_tip_count != null && prevTipCount != null && d.rain_tip_count > prevTipCount) {
+  if (isNewTip(prevTipCount, d.rain_tip_count)) {
     state.lastTipAt = Date.now();
   }
   if (d.wind_speed != null) {

@@ -108,3 +108,30 @@ test('rainRate returns 0 for null/non-positive inputs', () => {
   assert.equal(WC.rainRate(0, 100), 0);
   assert.equal(WC.rainRate(-1, 100), 0);
 });
+
+test('rainRate at the exact 1_800_000 ms cutoff', () => {
+  // The cutoff check is msSinceTip >= RAIN_ACTIVE_SECS * 1000, so the exact
+  // boundary value already falls on the "expired" side, same as one ms past it.
+  assert.equal(WC.rainRate(120, 1_800_000), 0);
+});
+
+test('isNewTip detects a normal increment', () => {
+  assert.equal(WC.isNewTip(4, 5), true);
+});
+
+test('isNewTip detects the 127 -> 0 wrap', () => {
+  assert.equal(WC.isNewTip(127, 0), true);
+});
+
+test('isNewTip reports no tip when the count is unchanged', () => {
+  assert.equal(WC.isNewTip(5, 5), false);
+});
+
+test('isNewTip reports no tip when nothing was known yet (prev null/undefined)', () => {
+  assert.equal(WC.isNewTip(null, 5), false);
+  assert.equal(WC.isNewTip(undefined, 5), false);
+});
+
+test('isNewTip reports no tip when the field was absent from this packet (next null)', () => {
+  assert.equal(WC.isNewTip(5, null), false);
+});
