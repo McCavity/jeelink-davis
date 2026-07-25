@@ -135,3 +135,15 @@ test('isNewTip reports no tip when nothing was known yet (prev null/undefined)',
 test('isNewTip reports no tip when the field was absent from this packet (next null)', () => {
   assert.equal(WC.isNewTip(5, null), false);
 });
+
+test('parseTimestampMs parses an ISO 8601 string with an offset', () => {
+  assert.equal(WC.parseTimestampMs('2026-07-25T13:24:00.660069+00:00'),
+    Date.parse('2026-07-25T13:24:00.660+00:00'));
+});
+
+test('parseTimestampMs returns null for missing or unparseable input, not NaN/now', () => {
+  assert.equal(WC.parseTimestampMs(null), null);
+  assert.equal(WC.parseTimestampMs(undefined), null);
+  assert.equal(WC.parseTimestampMs(''), null);
+  assert.equal(WC.parseTimestampMs('not-a-date'), null);
+});

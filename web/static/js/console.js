@@ -4,7 +4,7 @@ const {
   fmt, timeOf, humanElapsed, degToCompass, formatBearing,
   moonEmoji, moonPhaseKey, MOON_PHASE_EN, TREND_ARROWS,
   rssiPct, dataAgeState, meanOver, windPointerState, calcDewPoint,
-  mergeReading, rainRate, isNewTip,
+  mergeReading, rainRate, isNewTip, parseTimestampMs,
 } = WeatherCore;
 
 // ── Language ───────────────────────────────────────────────────────────────
@@ -480,20 +480,50 @@ function buildRose(dir, pointerState, lang) {
 let es = null;
 let backoff = 1000;
 
-function mergeOutdoor(d) {
+// Shared by the live SSE path and the /api/latest seed: both merge a partial
+// outdoor reading into state.outdoor, but they must stamp it with different
+// clocks. A live packet just arrived, so "now" is its honest age reference.
+// A seed snapshot carries its own `timestamp` — possibly hours old if the
+// station has been silent — and `at` must reflect that, not the moment the
+// fetch happened to complete, or the console would announce stale data as
+// fresh. `at` may be null (timestamp missing/unparseable on a seed): that
+// reads as "unknown age" everywhere downstream (dataAgeState/windPointerState
+// already treat a null age as stale), not as fresh.
+function applyOutdoorReading(d, at) {
   const prevTipCount = state.outdoor ? state.outdoor.rain_tip_count : null;
   state.outdoor = mergeReading(state.outdoor, d);
-  state.outdoorAt = Date.now();
+  state.outdoorAt = at;
+  // isNewTip already refuses to report a tip when prevTipCount is null (first
+  // reading ever seen) — exactly right for a seed, where "previous" tip count
+  // is unknowable, and nothing should be inferred about when the bucket last
+  // tipped from a snapshot alone.
   if (isNewTip(prevTipCount, d.rain_tip_count)) {
-    state.lastTipAt = Date.now();
+    state.lastTipAt = at;
   }
-  if (d.wind_speed != null) {
-    state.windSamples.push({ t: Date.now(), v: d.wind_speed });
+  // A wind sample is worth seeding too, so the wind page doesn't show a grey
+  // (stale) pointer for the first few seconds — but only when `at` is known;
+  // an unknown-age sample cannot honestly anchor a rolling mean.
+  if (d.wind_speed != null && at != null) {
+    state.windSamples.push({ t: at, v: d.wind_speed });
     // Keep the array bounded: a 10-minute window never needs more than this.
     const cutoff = Date.now() - 660_000;
     while (state.windSamples.length && state.windSamples[0].t < cutoff) state.windSamples.shift();
   }
+}
+
+function mergeOutdoor(d) {
+  applyOutdoorReading(d, Date.now());
   renderCurrent();
+}
+
+// One-shot seed from the server's merged snapshot, so a fresh page load
+// paints complete instead of filling in field-by-field as rotating Davis
+// packets happen to arrive. 204 (nothing received yet) leaves state exactly
+// as it was — an empty console, not a thrown error.
+async function seedFromLatest() {
+  const d = await getJSON('/api/latest');
+  if (!d) return;
+  applyOutdoorReading(d, parseTimestampMs(d.timestamp));
 }
 
 function connectStream() {
@@ -574,6 +604,7 @@ async function boot() {
   document.documentElement.lang = LANG;
   pageEls[0].classList.add('active');
   dotsEl.querySelector('.dot').classList.add('on');
+  await seedFromLatest();   // first paint is complete, not filled in over the next few seconds
   renderCurrent();
   tickClock();
   setInterval(tickClock, 1000);

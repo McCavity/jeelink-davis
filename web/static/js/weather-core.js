@@ -143,6 +143,18 @@ const WeatherCore = (function () {
     return nextCount !== prevCount;
   }
 
+  // /api/latest can answer with a snapshot that is arbitrarily old (the
+  // station may have gone silent hours ago) — the timestamp it carries, not
+  // the moment it happened to be fetched, is the only honest age reference.
+  // Returns null (not NaN, not "now") when the field is missing or the
+  // string doesn't parse, so a bad/absent timestamp reads as unknown age
+  // rather than as fresh.
+  function parseTimestampMs(iso) {
+    if (!iso) return null;
+    const ms = new Date(iso).getTime();
+    return Number.isNaN(ms) ? null : ms;
+  }
+
   function rssiPct(dbm) {
     return dbm == null ? 0 : Math.max(0, Math.min(100, ((dbm + 90) / 50) * 100));
   }
@@ -193,7 +205,7 @@ const WeatherCore = (function () {
     calcDewPoint, calcFeelsLike, fmt, timeOf, humanElapsed,
     degToCompass, formatBearing, moonEmoji, moonPhaseKey,
     rssiPct, lerpHex, tempColorHex, mergeReading, rainRate, isNewTip,
-    dataAgeState, meanOver, windPointerState,
+    dataAgeState, meanOver, windPointerState, parseTimestampMs,
   };
 })();
 
