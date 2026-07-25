@@ -233,6 +233,101 @@ cat > "$CONSOLE_STATE_DIR/.config/labwc/rc.xml" <<EOF
 EOF
 chown "$SERVICE_USER:$SERVICE_USER" "$CONSOLE_STATE_DIR/.config/labwc/rc.xml"
 
+# The console page hides its own pointer with CSS `cursor: none`, but that
+# only reaches inside the page — the compositor draws its own cursor on top,
+# and the panel's Goodix touchscreen also registers with the kernel as
+# mouse0, so labwc always has a pointer device and parks its cursor in the
+# top-left corner, where it sits motionless forever since nobody uses a
+# mouse. labwc 0.9.8 has no way to configure this away (checked: `man 5
+# labwc-config` on the target has no <cursor> element at all), and unclutter
+# is an X11-only tool that does nothing under Wayland. So instead: generate a
+# fully transparent XCursor theme and point XCURSOR_THEME at it in the unit
+# below — libxcursor, which wlroots uses to resolve cursor themes by name,
+# picks it up from the standard icon directories.
+#
+# Unlike SEAT_GROUP above — where nothing renders without it, so aborting is
+# right — a cursor stuck in the corner is a cosmetic blemish, not a reason to
+# abandon a kiosk installation. So this generates the theme in a subshell
+# with its own errexit, captures whether that subshell succeeded, and only
+# warns on failure rather than exiting. (`set +e` / capture / `set -e`
+# because a bare failing subshell would otherwise trip this script's own
+# errexit, and — a genuine bash gotcha, verified empirically — a subshell
+# used directly as an `if`/`||` condition silently ignores its own inner
+# `set -e`, so the exit status has to be captured as a separate step first.)
+echo "Generating a fully transparent cursor theme (hides the compositor's static pointer) …"
+XCURSOR_THEME_NAME=weather-console-blank
+XCURSOR_THEME_DIR="$CONSOLE_STATE_DIR/.icons/$XCURSOR_THEME_NAME"
+# Cursor names a compositor or Chromium is likely to request; all resolve to
+# the same 1x1 transparent image so no lookup falls through to another
+# theme's (visible) cursor.
+XCURSOR_NAMES=(
+    left_ptr default arrow top_left_arrow left_arrow X_cursor
+    hand1 hand2 pointer grab grabbing
+    text xterm ibeam
+    wait watch progress
+    crosshair cross plus
+    move fleur size_all
+    question_arrow help whats_this
+    no-drop not-allowed dnd-none
+)
+
+generate_cursor_theme() {
+    rm -rf "$XCURSOR_THEME_DIR"
+    install -d -o "$SERVICE_USER" -g "$SERVICE_USER" "$XCURSOR_THEME_DIR/cursors"
+    cat > "$XCURSOR_THEME_DIR/index.theme" <<'EOF'
+[Icon Theme]
+Name=Weather Console Blank Cursor
+Comment=Fully transparent 1x1 cursor; this kiosk is touch-only, no mouse in use.
+EOF
+    # Hand-rolled XCursor file: magic, header size 16, version 1.0, one
+    # table-of-contents entry pointing at one image chunk (header size 36,
+    # 1x1, hotspot 0,0, delay 0), followed by a single ARGB pixel that is
+    # fully transparent (0x00000000). No xcursorgen dependency, no binary
+    # blob committed to the repo — this is generated on install.
+    python3 - "$XCURSOR_THEME_DIR/cursors/left_ptr" <<'PY'
+import struct
+import sys
+
+path = sys.argv[1]
+width = height = 1
+xhot = yhot = 0
+delay = 0
+image_type = 0xfffd0002
+subtype = 1  # nominal size
+toc_count = 1
+chunk_position = 16 + toc_count * 12  # header (16B) + this one 12B TOC entry
+
+header = struct.pack('<4sIII', b'Xcur', 16, 0x00010000, toc_count)
+toc = struct.pack('<III', image_type, subtype, chunk_position)
+chunk = struct.pack('<IIIIIIIII', 36, image_type, subtype, 1,
+                     width, height, xhot, yhot, delay)
+pixel = struct.pack('<I', 0x00000000)  # fully transparent ARGB
+
+with open(path, 'wb') as f:
+    f.write(header + toc + chunk + pixel)
+PY
+    local name
+    for name in "${XCURSOR_NAMES[@]}"; do
+        [[ "$name" == left_ptr ]] && continue
+        ln -sf left_ptr "$XCURSOR_THEME_DIR/cursors/$name"
+    done
+    chown -R "$SERVICE_USER:$SERVICE_USER" "$XCURSOR_THEME_DIR"
+}
+
+set +e
+( set -e; generate_cursor_theme )
+CURSOR_THEME_STATUS=$?
+set -e
+
+if [[ $CURSOR_THEME_STATUS -eq 0 ]]; then
+    echo "Transparent cursor theme '$XCURSOR_THEME_NAME' installed."
+else
+    echo "WARNING: could not generate the transparent cursor theme; the" >&2
+    echo "  compositor's cursor may remain visible in a corner of the display." >&2
+    echo "  Continuing anyway — a visible cursor is cosmetic, unlike the seat" >&2
+    echo "  group above, without which nothing renders at all." >&2
+fi
+
 # Belt and braces: an installation from before this fix (or one interrupted
 # partway through) can already have part of this tree owned by root. This
 # script is meant to be idempotent, so a re-run must repair that, not just

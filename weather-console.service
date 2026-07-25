@@ -30,6 +30,11 @@ Environment=XDG_RUNTIME_DIR=/run/weather-console
 Environment=HOME=/var/lib/weather-console
 Environment=XDG_CONFIG_HOME=/var/lib/weather-console/.config
 Environment=WLR_LIBINPUT_NO_DEVICES=0
+# Points libxcursor (used by wlroots) at the fully transparent cursor theme
+# install-console.sh generates under $HOME/.icons — the touchscreen's Goodix
+# controller also registers as a mouse, so labwc always has a pointer device
+# and would otherwise park a visible, motionless cursor in a screen corner.
+Environment=XCURSOR_THEME=weather-console-blank
 
 # Chromium must not win the race against uvicorn at boot: without this the
 # display comes up showing a connection error instead of the console.

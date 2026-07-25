@@ -43,7 +43,10 @@ It also adds the service user to group `video` (so `vcgencmd` can report
 throttling) and to whichever group `seatd` created for seat access on that
 system, configures the display rotation together with a matching libinput
 touch calibration matrix (labwc does not rotate touch input along with the
-output transform on its own), and enables `weather-console.service`.
+output transform on its own), generates a fully transparent cursor theme (the
+touch panel's controller also registers as a mouse, so the compositor would
+otherwise leave a static cursor sitting in a corner of the screen), and
+enables `weather-console.service`.
 `deploy.sh` is unaffected — the kiosk is optional, touch hardware is not
 assumed.
 
