@@ -581,10 +581,41 @@ async function pollIndoor() {
   const d = await getJSON('/api/indoor');
   if (d) { state.indoor = d; state.indoorAt = Date.now(); renderCurrent(); }
 }
-async function pollSlow() {
-  const [today, totals] = await Promise.all([getJSON('/api/history/today'), getJSON('/api/rain/totals')]);
-  if (today)  state.today = today;
-  if (totals) state.rainTotals = totals;
+// /api/history/today and /api/rain/totals used to be fetched together every
+// 60s via a single pollSlow(). Measured on the target hardware (Raspberry
+// Pi 4, 3.5M rows, 384MB SQLite):
+//   /api/history/today   9.9 / 12.0 / 9.7 s
+//   /api/rain/totals    26.2 / 30.3 / 28.8 s
+// That is ~40s of server CPU inside every 60s window, permanently — the
+// host sat at 75°C / load 2.2 with the console polling; stopping it dropped
+// that to 64.2°C / load 0.68 within 100s. The server-side slowness is a
+// separate defect, but a 26s endpoint must not be polled every minute
+// regardless of how fast it later becomes — so each endpoint gets its own,
+// much longer cadence instead of one shared 60s poll:
+//   - today's min/max and today's rain total only change slowly (a handful
+//     of times a day at most), so 5 minutes of staleness is invisible to
+//     someone glancing at a kiosk;
+//   - week/month/year rain totals only change at all when it is actively
+//     raining, so 15 minutes of staleness is unnoticeable and still far
+//     less punishing than the previous 60s cadence.
+// Do NOT "tidy" these back down to 60s — that reintroduces the thermal
+// problem above.
+const TODAY_POLL_MS = 5 * 60_000;        // /api/history/today: ~10-12s each
+const RAIN_TOTALS_POLL_MS = 15 * 60_000; // /api/rain/totals: ~26-30s each
+// Half of TODAY_POLL_MS and not a multiple of it, so the delayed first
+// periodic rain-totals run (see startPolling) never lands on the same tick
+// as a today poll, now or on any later repeat — two ~10s+~28s heavy SQLite
+// queries overlapping is worse than running them back to back.
+const RAIN_TOTALS_STAGGER_MS = TODAY_POLL_MS / 2;
+
+async function pollToday() {
+  const d = await getJSON('/api/history/today');
+  if (d) state.today = d;
+  renderCurrent();
+}
+async function pollRainTotals() {
+  const d = await getJSON('/api/rain/totals');
+  if (d) state.rainTotals = d;
   renderCurrent();
 }
 async function pollSolar() {
@@ -594,7 +625,14 @@ async function pollSolar() {
 
 function startPolling() {
   pollIndoor(); setInterval(pollIndoor, 30_000);
-  pollSlow();   setInterval(pollSlow, 60_000);
+  // Both slow endpoints are still fetched once here at boot, so first paint
+  // is complete — only their periodic cadence moves off the old 60s poll.
+  pollToday();
+  setInterval(pollToday, TODAY_POLL_MS);
+  pollRainTotals();
+  // Staggered: the interval itself doesn't start until RAIN_TOTALS_STAGGER_MS
+  // after boot, so its periodic runs never coincide with pollToday's.
+  setTimeout(() => setInterval(pollRainTotals, RAIN_TOTALS_POLL_MS), RAIN_TOTALS_STAGGER_MS);
   pollSolar();  setInterval(pollSolar, 900_000);
 }
 
