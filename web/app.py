@@ -356,3 +356,11 @@ async def forecast():
     _forecast_cache["data"] = data
     _forecast_cache["expires"] = now + 1800.0
     return data
+
+
+@app.get("/api/system")
+async def system():
+    from . import system_info
+
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, system_info.read_system)
