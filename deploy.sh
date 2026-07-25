@@ -121,6 +121,11 @@ echo ""
 echo "Deployment complete."
 echo ""
 echo "Next steps:"
-echo "  1. Edit $INSTALL_DIR/config.toml — set latitude, longitude, elevation, timezone."
+if [[ -f "$INSTALL_DIR/config.toml" ]]; then
+    echo "  1. $INSTALL_DIR/config.toml was left as it was — check it still matches your station."
+else
+    echo "  1. sudo cp $INSTALL_DIR/config.toml.example $INSTALL_DIR/config.toml"
+    echo "     then edit it — set latitude, longitude, elevation, timezone."
+fi
 echo "  2. sudo systemctl restart $SERVICE_FILE"
 echo "  3. sudo journalctl -u $SERVICE_FILE -f   # watch the logs"
