@@ -9,6 +9,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="/static/js/weather-core.js"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
     body { font-family: 'Inter', sans-serif; }
@@ -238,7 +239,7 @@
         <div>
           <div id="wind-dir-label" class="value-medium text-sky-300">—</div>
           <div class="text-slate-500 text-sm mt-1">
-            <span id="wind-dir-deg" class="mono text-slate-400">—</span>°
+            <span id="wind-dir-deg" class="mono text-slate-400">—</span>
           </div>
         </div>
       </div>
@@ -481,9 +482,27 @@
   </div>
 
 <script>
+const {
+  MOON_PHASE_EN, TREND_ARROWS, TEMP_COLOR_STOPS, RAIN_ACTIVE_SECS,
+  calcDewPoint, calcFeelsLike, fmt, timeOf: coreTimeOf, humanElapsed: coreHumanElapsed,
+  degToCompass: coreDegToCompass, formatBearing, moonEmoji, moonPhaseKey,
+  rssiPct, lerpHex, tempColorHex,
+} = WeatherCore;
+
+// Thin wrappers keep the existing call sites unchanged where the core now
+// needs the language, the locale or the translator handed to it explicitly.
+// timeOf keeps 'de-DE' because that is what the dashboard did before this
+// refactor; changing it is a separate decision, not a side effect of one.
+const degToCompass = deg => coreDegToCompass(deg, currentLang);
+const humanElapsed = ms => coreHumanElapsed(ms, tr);
+const timeOf = iso => coreTimeOf(iso, 'de-DE');
+function moonPhaseName(phase) {
+  const key = moonPhaseKey(phase);
+  return tr('moon_phases.' + key, MOON_PHASE_EN[key]);
+}
+
 // ── Constants ──────────────────────────────────────────────────────────────
 const MAX_POINTS = 50;
-const COMPASS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
 const WMO_ICONS = {
   0:'☀️', 1:'🌤️', 2:'⛅', 3:'☁️',
   45:'🌫️', 48:'🌫️',
@@ -552,27 +571,6 @@ const TEMP_MODES      = ['temperature', 'dew_point', 'wind_chill'];
 const TEMP_DOT_COLORS = { temperature: 'bg-amber-400', dew_point: 'bg-teal-400', wind_chill: 'bg-sky-400' };
 let tempMode = 'temperature';
 
-function calcDewPoint(T, RH) {
-  if (T == null || RH == null) return null;
-  const a = 17.625, b = 243.04;
-  const gamma = (a * T) / (b + T) + Math.log(RH / 100);
-  return b * gamma / (a - gamma);
-}
-
-// Apparent / feels-like temperature.
-// Cold + windy (T ≤ 10 °C, V ≥ 1.33 m/s): Environment Canada wind chill.
-// All other conditions: Australian BOM apparent temperature (AT = T + 0.33·e − 0.70·ws − 4.00).
-function calcFeelsLike(T, V_ms, RH) {
-  if (T == null) return null;
-  const V = V_ms ?? 0;
-  if (T <= 10 && V >= 1.33) {
-    const Vkph = V * 3.6;
-    return 13.12 + 0.6215 * T - 11.37 * Math.pow(Vkph, 0.16) + 0.3965 * T * Math.pow(Vkph, 0.16);
-  }
-  const e = RH != null ? (RH / 100) * 6.105 * Math.exp(17.27 * T / (237.7 + T)) : 0;
-  return T + 0.33 * e - 0.70 * V - 4.00;
-}
-
 function updateTempBar(temp) {
   const triangle = document.getElementById('temp-bar-triangle');
   const barEl    = document.getElementById('temp-bar-el');
@@ -639,15 +637,6 @@ function cycleTemp() {
 const _storedTip = localStorage.getItem('lastTipWallTime');
 let lastTipWallTime = _storedTip ? parseInt(_storedTip, 10) : null;
 let lastRainSecs    = null;  // inter-tip interval (s) at that moment
-const RAIN_ACTIVE_SECS = 1800; // 30 min decay — after this, rate resets to 0
-
-function humanElapsed(ms) {
-  const s = Math.floor(ms / 1000);
-  if (s < 60)    return s + ' '                  + tr('cards.rain_ago',     's ago');
-  if (s < 3600)  return Math.floor(s / 60)   + ' ' + tr('cards.rain_ago_min', 'min ago');
-  if (s < 86400) return Math.floor(s / 3600)  + ' ' + tr('cards.rain_ago_h',   'h ago');
-  return           Math.floor(s / 86400) + ' ' + tr('cards.rain_ago_d',   'd ago');
-}
 
 function tickRain() {
   if (lastTipWallTime === null) return;
@@ -885,46 +874,11 @@ function initCharts() {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
-function degToCompass(deg) {
-  return deg == null ? '—' : COMPASS[Math.round(deg / 22.5) % 16];
-}
-function fmt(v, dec = 1) {
-  return v == null ? '—' : Number(v).toFixed(dec);
-}
-function timeOf(iso) {
-  return new Date(iso).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit', hour12:false });
-}
-function rssiPct(dbm) {
-  return dbm == null ? 0 : Math.max(0, Math.min(100, ((dbm + 90) / 50) * 100));
-}
 function rssiColor(dbm) {
   if (dbm == null) return 'text-slate-400';
   if (dbm > -65)   return 'text-emerald-400';
   if (dbm > -75)   return 'text-amber-400';
   return 'text-rose-400';
-}
-// Comfort-zone colour stops: [-20 dark-blue … 0 blue … 12 light-blue … 18 green … 25 orange … 30+ dark-red]
-const TEMP_COLOR_STOPS = [
-  [-20, '#1e3a8a'], [0, '#1d4ed8'], [5, '#3b82f6'],
-  [12,  '#7dd3fc'], [16, '#bae6fd'], [18, '#22c55e'],
-  [25,  '#f97316'], [27, '#ef4444'], [30, '#991b1b'], [40, '#991b1b'],
-];
-function lerpHex(c1, c2, t) {
-  const h = s => [parseInt(s.slice(1,3),16), parseInt(s.slice(3,5),16), parseInt(s.slice(5,7),16)];
-  const [r1,g1,b1] = h(c1), [r2,g2,b2] = h(c2);
-  return `rgb(${Math.round(r1+(r2-r1)*t)},${Math.round(g1+(g2-g1)*t)},${Math.round(b1+(b2-b1)*t)})`;
-}
-function tempColorHex(c) {
-  if (c == null) return '#64748b';
-  const s = TEMP_COLOR_STOPS;
-  if (c <= s[0][0]) return s[0][1];
-  if (c >= s[s.length-1][0]) return s[s.length-1][1];
-  for (let i = 0; i < s.length-1; i++) {
-    if (c >= s[i][0] && c <= s[i+1][0]) {
-      return lerpHex(s[i][1], s[i+1][1], (c - s[i][0]) / (s[i+1][0] - s[i][0]));
-    }
-  }
-  return '#64748b';
 }
 function tempColor(c) {
   if (c == null) return 'text-slate-400';
@@ -933,26 +887,6 @@ function tempColor(c) {
   if (c >= 10)   return 'text-emerald-400';
   if (c >= 0)    return 'text-sky-400';
   return 'text-blue-300';
-}
-function moonEmoji(phase) {
-  if (phase < 1.85 || phase >= 26.15) return '🌑';
-  if (phase < 7.38)  return '🌒';
-  if (phase < 9.22)  return '🌓';
-  if (phase < 14.77) return '🌔';
-  if (phase < 16.61) return '🌕';
-  if (phase < 22.15) return '🌖';
-  if (phase < 23.99) return '🌗';
-  return '🌘';
-}
-function moonPhaseName(phase) {
-  if (phase < 1.85 || phase >= 26.15) return tr('moon_phases.new',             'New Moon');
-  if (phase < 7.38)  return tr('moon_phases.waxing_crescent', 'Waxing Crescent');
-  if (phase < 9.22)  return tr('moon_phases.first_quarter',   'First Quarter');
-  if (phase < 14.77) return tr('moon_phases.waxing_gibbous',  'Waxing Gibbous');
-  if (phase < 16.61) return tr('moon_phases.full',            'Full Moon');
-  if (phase < 22.15) return tr('moon_phases.waning_gibbous',  'Waning Gibbous');
-  if (phase < 23.99) return tr('moon_phases.last_quarter',    'Last Quarter');
-  return tr('moon_phases.waning_crescent', 'Waning Crescent');
 }
 function setText(id, text) {
   const el = document.getElementById(id);
@@ -993,7 +927,7 @@ function renderState() {
   setText('wind-speed-val', fmt(s.wind_speed));
   setText('wind-gust-val',  fmt(s.wind_gust));
   setText('wind-dir-label', degToCompass(s.wind_direction));
-  setText('wind-dir-deg',   s.wind_direction ?? '—');
+  setText('wind-dir-deg',   formatBearing(s.wind_direction));
   if (s.wind_direction != null) {
     document.getElementById('wind-arrow').style.transform = `rotate(${s.wind_direction}deg)`;
   }
@@ -1534,7 +1468,6 @@ function renderHistStats() {
 }
 
 // ── Indoor sensor (BME280) ────────────────────────────────────────────────
-const TREND_ARROWS = { rising: '↗', falling: '↘', steady: '→', unknown: '—' };
 const TREND_COLORS = {
   rising:  'text-emerald-400',
   falling: 'text-rose-400',

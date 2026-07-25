@@ -20,6 +20,38 @@ The bundled web dashboard (`web/`) is a single-page app served via FastAPI:
 
 ![Dashboard screenshot](docs/dashboard.png)
 
+### Touch console
+
+A second front end at `/console/` is sized for a 1280×720 touch panel (the
+official 7" Touch Display 2 mounted landscape): seven pages — now, rain, wind,
+sun & moon, indoor, status, system — cycling every 15 seconds, with swipe and
+tap-to-jump. It uses no external resources, so it keeps working with the
+internet disconnected.
+
+To run it full-screen on the machine itself, as an optional kiosk display:
+
+```bash
+sudo ./install-console.sh --lang en --rotate 90
+```
+
+This installs `labwc` (Wayland compositor), `chromium`, `seatd`, `curl`
+(used by the service's startup readiness check) and `fonts-noto-color-emoji`
+(so the Sun & moon page's sun/moon glyphs render instead of tofu boxes), and
+enables `seatd.service` — a small seat-management daemon that lets the
+service user reach the GPU and touch input without a login session or root.
+It also adds the service user to group `video` (so `vcgencmd` can report
+throttling) and to whichever group `seatd` created for seat access on that
+system, configures the display rotation together with a matching libinput
+touch calibration matrix (labwc does not rotate touch input along with the
+output transform on its own), generates a fully transparent cursor theme (the
+touch panel's controller also registers as a mouse, so the compositor would
+otherwise leave a static cursor sitting in a corner of the screen), and
+enables `weather-console.service`.
+`deploy.sh` is unaffected — the kiosk is optional, touch hardware is not
+assumed.
+
+Design notes: `docs/specs/2026-07-25-touch-console-design.md`.
+
 ## Architecture
 
 ```mermaid

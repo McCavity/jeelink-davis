@@ -1,0 +1,55 @@
+[Unit]
+Description=Weather touch console (labwc + Chromium kiosk)
+After=davis-weather.service seatd.service
+Wants=davis-weather.service
+Requires=seatd.service
+
+[Service]
+Type=simple
+User=davis
+Group=davis
+# __SEAT_GROUP__ is a placeholder: install-console.sh replaces it with
+# whichever group seatd actually created on this system (that name is not
+# the same across distributions/packagings — see the installer).
+SupplementaryGroups=video __SEAT_GROUP__
+
+# davis is a system account with no login/PAM session (deploy.sh creates it
+# with --no-create-home --shell /usr/sbin/nologin), so there is no logind
+# session to hand out a ready-made runtime directory or $HOME. Ask systemd
+# for both directly instead of assuming they exist:
+#   - RuntimeDirectory= creates /run/weather-console, owned by User/Group,
+#     before ExecStart runs, and removes it on stop.
+#   - StateDirectory= creates /var/lib/weather-console the same way, but
+#     persistently — this is where labwc's config lives (see the installer),
+#     so HOME below points at it and labwc finds $HOME/.config/labwc there.
+RuntimeDirectory=weather-console
+RuntimeDirectoryMode=0700
+StateDirectory=weather-console
+StateDirectoryMode=0700
+Environment=XDG_RUNTIME_DIR=/run/weather-console
+Environment=HOME=/var/lib/weather-console
+Environment=XDG_CONFIG_HOME=/var/lib/weather-console/.config
+Environment=WLR_LIBINPUT_NO_DEVICES=0
+# Points libxcursor (used by wlroots) at the fully transparent cursor theme
+# install-console.sh generates under $HOME/.icons — the touchscreen's Goodix
+# controller also registers as a mouse, so labwc always has a pointer device
+# and would otherwise park a visible, motionless cursor in a screen corner.
+Environment=XCURSOR_THEME=weather-console-blank
+
+# Chromium must not win the race against uvicorn at boot: without this the
+# display comes up showing a connection error instead of the console.
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 60); do curl -sf -o /dev/null http://127.0.0.1:8000/console/ && exit 0; sleep 2; done; exit 1'
+ExecStart=/usr/bin/labwc -s '/usr/bin/chromium \
+  --kiosk \
+  --ozone-platform=wayland \
+  --overscroll-history-navigation=0 \
+  --disable-session-crashed-bubble \
+  --disable-infobars \
+  --noerrdialogs \
+  --check-for-update-interval=31536000 \
+  --app=http://127.0.0.1:8000/console/?lang=en'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

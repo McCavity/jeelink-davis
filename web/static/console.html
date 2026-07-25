@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=1280, height=720, initial-scale=1, user-scalable=no" />
+  <title>Weather console</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  <script src="/static/js/weather-core.js"></script>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html, body {
+      width:1280px; height:720px; overflow:hidden;
+      background:#0b1120; color:#e2e8f0;
+      font-family:-apple-system, "Segoe UI", Roboto, sans-serif;
+      user-select:none; -webkit-user-select:none;
+      touch-action:none; cursor:none;
+    }
+    #app { width:1280px; height:720px; padding:0 26px; display:flex; flex-direction:column; }
+
+    /* Header */
+    #head { height:56px; flex:0 0 56px; display:flex; align-items:center; gap:18px; border-bottom:1px solid #1e293b; }
+    #page-title { font-size:26px; font-weight:700; letter-spacing:.14em; color:#94a3b8; }
+    #head .spacer { flex:1; }
+    #age-wrap { display:flex; align-items:center; gap:9px; font-size:19px; color:#64748b; font-variant-numeric:tabular-nums; }
+    #age-dot { width:13px; height:13px; border-radius:50%; background:#34d399; }
+    #age-dot.aging { background:#f59e0b; }
+    #age-dot.stale { background:#64748b; }
+    #clock { font-size:40px; font-weight:600; font-variant-numeric:tabular-nums; }
+    #date { font-size:19px; color:#64748b; }
+
+    /* Stage */
+    #stage { flex:1; position:relative; min-height:0; }
+    .page { position:absolute; inset:0; padding:22px 0 8px; display:flex; gap:22px; opacity:0; pointer-events:none; }
+    .page.active { opacity:1; pointer-events:auto; }
+    .page.fade { transition:opacity 180ms linear; }
+    .page.slide { transition:transform 200ms ease-out, opacity 200ms ease-out; }
+    .page.out-left  { transform:translateX(-90px); opacity:0; }
+    .page.out-right { transform:translateX(90px);  opacity:0; }
+
+    /* Tiles */
+    .col  { display:flex; flex-direction:column; gap:18px; min-width:0; }
+    .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+    .grid4 { display:grid; grid-template-columns:repeat(4,1fr); gap:18px; }
+    .tile { background:#131c2e; border:1px solid #1e293b; border-radius:14px; padding:18px 22px;
+            display:flex; flex-direction:column; justify-content:center; min-width:0; }
+    .tile.ctr { align-items:center; text-align:center; }
+    .lbl  { font-size:20px; text-transform:uppercase; letter-spacing:.11em; color:#64748b; font-weight:600; }
+    .huge { font-size:196px; line-height:.86; font-weight:300; font-variant-numeric:tabular-nums; letter-spacing:-.03em; }
+    .big  { font-size:88px;  line-height:1;   font-weight:300; font-variant-numeric:tabular-nums; }
+    .med  { font-size:58px;  line-height:1;   font-weight:300; font-variant-numeric:tabular-nums; }
+    .unit  { font-size:34px; color:#64748b; margin-left:8px; }
+    .unit-s{ font-size:24px; color:#64748b; margin-left:6px; }
+    .sub   { font-size:23px; color:#94a3b8; font-variant-numeric:tabular-nums; }
+    .sub-d { font-size:21px; color:#64748b; font-variant-numeric:tabular-nums; }
+    .row   { display:flex; align-items:baseline; gap:14px; }
+    .mm    { display:flex; gap:22px; font-size:26px; font-variant-numeric:tabular-nums; }
+    .bar   { height:16px; background:#1e293b; border-radius:8px; overflow:hidden; margin-top:14px; }
+    .bar > i { display:block; height:100%; border-radius:8px; }
+    .chip  { display:inline-flex; align-items:center; gap:8px; font-size:20px; padding:7px 15px;
+             border-radius:9px; background:#0f1a2b; border:1px solid #1e293b; color:#94a3b8; }
+    .chip b { font-weight:600; color:#e2e8f0; }
+    .chip.ok   { color:#34d399; border-color:#134e39; }
+    .chip.warn { color:#fbbf24; border-color:#78350f; }
+    .chips { display:flex; gap:12px; flex-wrap:wrap; }
+
+    /* Ageing: dim at 90 s, grey out at 10 min */
+    .aging .value { opacity:.55; }
+    .stale .value { opacity:.35; filter:grayscale(1); }
+
+    .amber{color:#fbbf24} .sky{color:#38bdf8} .teal{color:#2dd4bf} .blue{color:#60a5fa}
+    .violet{color:#a78bfa} .orange{color:#fdba74} .cyan{color:#67e8f9} .rose{color:#fb7185}
+    .slate{color:#94a3b8} .em{color:#34d399} .red{color:#f87171}
+
+    /* Dots */
+    #dots { height:44px; flex:0 0 44px; display:flex; align-items:center; justify-content:center; gap:12px; }
+    .dotbox { width:44px; height:44px; display:flex; align-items:center; justify-content:center; }
+    .dot { width:12px; height:12px; border-radius:50%; background:#334155; transition:width 150ms, background 150ms; }
+    .dot.on { background:#94a3b8; width:34px; border-radius:6px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="head">
+      <div id="page-title">—</div>
+      <div class="spacer"></div>
+      <div id="age-wrap"><span id="age-dot"></span><span id="age">—</span></div>
+      <div id="clock">--:--</div>
+      <div id="date">—</div>
+    </div>
+    <div id="stage"></div>
+    <div id="dots"></div>
+  </div>
+  <script src="/static/js/console.js"></script>
+</body>
+</html>

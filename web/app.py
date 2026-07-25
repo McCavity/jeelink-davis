@@ -27,6 +27,7 @@ from astral.sun import elevation as sun_elevation
 from astral.sun import sun as astral_sun
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .broadcaster import broadcaster
@@ -120,6 +121,16 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return (STATIC_DIR / "index.html").read_text()
+
+
+@app.get("/console", include_in_schema=False)
+async def console_redirect():
+    return RedirectResponse("/console/")
+
+
+@app.get("/console/", response_class=HTMLResponse)
+async def console():
+    return (STATIC_DIR / "console.html").read_text()
 
 
 @app.get("/api/latest")
@@ -345,3 +356,11 @@ async def forecast():
     _forecast_cache["data"] = data
     _forecast_cache["expires"] = now + 1800.0
     return data
+
+
+@app.get("/api/system")
+async def system():
+    from . import system_info
+
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, system_info.read_system)
