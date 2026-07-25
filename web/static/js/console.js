@@ -98,7 +98,12 @@ function goTo(index, direction) {
   renderCurrent();
   to.classList.add('active');
   setTimeout(() => {
-    from.className = 'page';
+    // Remove only the transition classes this call added — never reset the
+    // whole className. A second goTo() may have already made `from` the
+    // incoming page again (and re-added 'active', or a fresh/aging/stale
+    // class via updateAgeHeader) before this timeout fires; a blanket
+    // `from.className = 'page'` would silently strip that.
+    from.classList.remove('fade', 'slide', 'out-left', 'out-right');
     to.classList.remove('slide', 'out-left', 'out-right');
   }, 220);
   dotsEl.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('on', i === current));
