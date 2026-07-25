@@ -67,3 +67,44 @@ test('humanElapsed asks the caller for its words', () => {
   assert.equal(WC.humanElapsed(42_000, tr), '42 s her');
   assert.equal(WC.humanElapsed(300_000, tr), '5 min her');
 });
+
+test('mergeReading keeps previous values when incoming keys are null/undefined', () => {
+  const prev = { temperature: 21.5, humidity: 55, rssi: -60 };
+  const incoming = { temperature: null, humidity: undefined, wind_speed: 3.2 };
+  assert.deepEqual(WC.mergeReading(prev, incoming), {
+    temperature: 21.5, humidity: 55, rssi: -60, wind_speed: 3.2,
+  });
+});
+
+test('mergeReading keeps incoming 0 and false — values, not absences', () => {
+  const prev = { rain_secs: 42, battery_ok: true };
+  const incoming = { rain_secs: 0, battery_ok: false };
+  assert.deepEqual(WC.mergeReading(prev, incoming), { rain_secs: 0, battery_ok: false });
+});
+
+test('mergeReading tolerates a null prev (first packet ever)', () => {
+  // No previous value exists to keep for the null key, so it is simply
+  // absent from the result — not present-with-a-null-value.
+  assert.deepEqual(WC.mergeReading(null, { temperature: 12.3, humidity: null }),
+    { temperature: 12.3 });
+});
+
+test('mergeReading returns a new object, not a mutated prev', () => {
+  const prev = { temperature: 10 };
+  const merged = WC.mergeReading(prev, { humidity: 50 });
+  assert.notEqual(merged, prev);
+  assert.deepEqual(prev, { temperature: 10 });
+});
+
+test('rainRate applies the 1800s cutoff since the last tip', () => {
+  assert.equal(WC.rainRate(120, 1_799_000), 6);              // 720/120 = 6, still inside
+  assert.equal(WC.rainRate(120, 1_800_001), 0);               // just past the cutoff
+  assert.equal(WC.rainRate(120, 0), 6);                       // fresh tip
+});
+
+test('rainRate returns 0 for null/non-positive inputs', () => {
+  assert.equal(WC.rainRate(null, 100), 0);
+  assert.equal(WC.rainRate(120, null), 0);
+  assert.equal(WC.rainRate(0, 100), 0);
+  assert.equal(WC.rainRate(-1, 100), 0);
+});
