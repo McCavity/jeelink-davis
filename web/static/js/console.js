@@ -96,6 +96,22 @@ const PAGES = [
       const o = s.outdoor || {}, td = s.today || {};
       const mean = meanOver(s.windSamples, 600_000, Date.now());
       const ageMs = s.outdoorAt == null ? null : Date.now() - s.outdoorAt;
+      const pointerState = windPointerState(mean, ageMs);
+      // The rose itself stays a pure SVG builder (buildRose) — it has no
+      // clock and no translator. Whether there is a "since HH:MM" to show,
+      // and what words surround it, are both caller concerns: this render()
+      // already has state.outdoorAt and tr() in scope, buildRose has neither.
+      let note = '';
+      if (pointerState === 'calm') {
+        note = tr('console.calm', 'calm');
+      } else if (pointerState === 'stale') {
+        // outdoorAt itself can be null (no outdoor packet ever seen) — there
+        // is then no timestamp to report a "since" against, so fall back to
+        // the plain no_data wording instead of stamping a fabricated time.
+        note = s.outdoorAt == null
+          ? tr('console.no_data', 'no data')
+          : `${tr('console.no_data_since', 'no data since')} ${timeOf(new Date(s.outdoorAt).toISOString(), LOCALE)}`;
+      }
       root.innerHTML = `
         <div class="tile ctr rose-tile" style="flex:0 0 600px;padding:6px"></div>
         <div class="col" style="flex:1">
@@ -109,7 +125,7 @@ const PAGES = [
           </div>
         </div>`;
       root.querySelector('.rose-tile').appendChild(
-        buildRose(o.wind_direction, windPointerState(mean, ageMs), LANG));
+        buildRose(o.wind_direction, pointerState, LANG, note));
     } },
   { id: 'sun', title: 'Sun & moon', age: null, render: (root, s) => {
       const sol = s.solar;
@@ -435,7 +451,7 @@ function polar(r, deg) {
 
 const POINTER_COLORS = { live: '#38bdf8', calm: '#f87171', stale: '#475569' };
 
-function buildRose(dir, pointerState, lang) {
+function buildRose(dir, pointerState, lang, note) {
   const col = POINTER_COLORS[pointerState];
   const svg = svgEl('svg', { viewBox: '0 0 600 600', width: 560, height: 560, 'aria-hidden': 'true' });
 
@@ -475,7 +491,13 @@ function buildRose(dir, pointerState, lang) {
 
   svg.appendChild(svgEl('circle', { cx: 300, cy: 300, r: 270, fill: 'none', stroke: '#131c2e', 'stroke-width': 16 }));
 
-  if (dir != null && pointerState !== 'stale') {
+  // The pointer arc and needle are drawn whenever a bearing is known — even
+  // in the stale state, at the grey POINTER_COLORS.stale colour — because a
+  // direction the station reported before it went quiet is still an honest
+  // reading, just an aging one. Only a genuinely unknown bearing (dir ==
+  // null: nothing was ever received) draws neither, since inventing a
+  // pointer at 0° would fabricate a reading nobody sent.
+  if (dir != null) {
     const [ax, ay] = polar(270, dir - 13), [bx, by] = polar(270, dir + 13);
     svg.appendChild(svgEl('path', { d: `M${ax} ${ay} A 270 270 0 0 1 ${bx} ${by}`,
       fill: 'none', stroke: col, 'stroke-width': 16, 'stroke-linecap': 'round' }));
@@ -487,18 +509,26 @@ function buildRose(dir, pointerState, lang) {
   const bearing = svgEl('text', { x: 300, y: 286, fill: pointerState === 'stale' ? '#475569' : '#e2e8f0',
     'font-size': 74, 'text-anchor': 'middle', 'dominant-baseline': 'middle',
     'font-family': 'ui-monospace, monospace', 'font-weight': 300 });
-  bearing.textContent = pointerState === 'stale' ? '—' : formatBearing(dir);
+  // '—' only when there is truly nothing to show a bearing for — not
+  // whenever the state is stale, since a stale-but-known bearing is exactly
+  // the case the design calls out as honest ("we know where the vane last
+  // pointed").
+  bearing.textContent = dir == null ? '—' : formatBearing(dir);
   svg.appendChild(bearing);
 
   const point = svgEl('text', { x: 300, y: 344, fill: col, 'font-size': 40,
     'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-weight': 600 });
-  point.textContent = pointerState === 'stale' ? '' : degToCompass(dir, lang);
+  point.textContent = dir == null ? '' : degToCompass(dir, lang);
   svg.appendChild(point);
 
-  const note = svgEl('text', { x: 300, y: 388, fill: '#475569', 'font-size': 21,
+  // buildRose no longer composes its own note text (that needs a clock and
+  // a translator, neither of which belongs in a pure SVG builder) — the
+  // caller passes the finished string, covering "calm" and "no data since
+  // HH:MM" alike; buildRose only has to render it.
+  const noteEl = svgEl('text', { x: 300, y: 388, fill: '#475569', 'font-size': 21,
     'text-anchor': 'middle', 'dominant-baseline': 'middle' });
-  note.textContent = pointerState === 'calm' ? tr('console.calm', 'calm') : '';
-  svg.appendChild(note);
+  noteEl.textContent = note || '';
+  svg.appendChild(noteEl);
 
   return svg;
 }

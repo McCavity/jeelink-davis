@@ -1150,6 +1150,22 @@ Open `/console/` and swipe to Wind. Expected:
 
 Stop the service and wait past 10 minutes (or temporarily lower `AGE_STALE_MS` in `weather-core.js` to `10_000`, observe, then restore it and re-run `node --test tests/test_weather_core.mjs`).
 
+> **Correction (hardware acceptance, 2026-07-25):** the line below, as originally
+> written, told a reader to expect the pointer arc/needle suppressed and the
+> bearing showing `—` in *every* stale case. That is wrong and was implemented
+> wrong — `buildRose()` drew nothing at all whenever `pointerState === 'stale'`,
+> so a vane that had simply gone quiet (the design's own motivating scenario)
+> made the rose look broken instead of grey. The design
+> (`docs/specs/2026-07-25-touch-console-design.md`) actually calls for: when a
+> bearing is known but old, draw the arc/needle in grey and keep showing that
+> bearing (muted); only when no bearing was ever received (`dir == null`) does
+> the pointer stay off and the centre show `—`. Both cases get a note saying
+> there is no data **and since when** (e.g. "no data since 19:10"). Fixed in
+> `web/static/js/console.js`; see `.superpowers/sdd/grey-needle-report.md`.
+> The "Expected" line immediately below describes the ORIGINAL (defective)
+> behaviour and is kept only for the historical record of what Task 6 actually
+> shipped — do not follow it as current guidance.
+
 Expected: the pointer turns **grey, not red**, and the bearing shows `—`. This is the confusion the third state exists to prevent; an untested third state is only a claim.
 
 - [ ] **Step 5: Commit**

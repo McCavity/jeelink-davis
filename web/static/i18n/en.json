@@ -188,6 +188,7 @@
     "throttling":   "Throttling",
     "since_boot":   "SINCE BOOT",
     "core":         "CORE",
-    "calm":         "calm"
+    "calm":         "calm",
+    "no_data_since":"no data since"
   }
 }

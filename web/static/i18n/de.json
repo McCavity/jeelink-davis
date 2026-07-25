@@ -188,6 +188,7 @@
     "throttling":   "Drosselung",
     "since_boot":   "SEIT START",
     "core":         "KERN",
-    "calm":         "windstill"
+    "calm":         "windstill",
+    "no_data_since":"keine Daten seit"
   }
 }
