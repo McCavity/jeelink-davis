@@ -83,16 +83,37 @@ apt-get install -y --no-install-recommends labwc wlr-randr chromium seatd curl f
 echo "Enabling seatd …"
 systemctl enable --now seatd.service
 
+# The group that actually grants seat access is not a fixed name across
+# distributions/packagings — on Debian 13 seatd runs as `seatd -g video` and
+# there is no dedicated seat group at all (getent group has nothing matching
+# "seat"). The authoritative answer is whichever group owns seatd's own
+# socket once it is up, so read that rather than guessing from a name list.
+# The socket does not appear instantly after `systemctl enable --now`, so
+# wait for it briefly — bounded, so a seatd that never creates a socket
+# doesn't hang this script forever.
+SEAT_SOCKET=/run/seatd.sock
 SEAT_GROUP=""
-for candidate in seat _seatd seatd; do
-    if getent group "$candidate" > /dev/null 2>&1; then
-        SEAT_GROUP="$candidate"
-        break
-    fi
+for _ in 1 2 3 4 5; do
+    [[ -S "$SEAT_SOCKET" ]] && break
+    sleep 1
 done
+
+if [[ -S "$SEAT_SOCKET" ]]; then
+    SEAT_GROUP="$(stat -c '%G' "$SEAT_SOCKET")"
+    echo "Found $SEAT_SOCKET, owned by group '$SEAT_GROUP' …"
+else
+    echo "WARNING: $SEAT_SOCKET did not appear within 5s; falling back to a candidate group name list." >&2
+    for candidate in seat _seatd seatd video; do
+        if getent group "$candidate" > /dev/null 2>&1; then
+            SEAT_GROUP="$candidate"
+            break
+        fi
+    done
+fi
+
 if [[ -z "$SEAT_GROUP" ]]; then
     echo "ERROR: could not find the group seatd uses for seat access." >&2
-    echo "  Checked: seat, _seatd, seatd — none exist on this system." >&2
+    echo "  Checked: $SEAT_SOCKET (never appeared), then candidate groups seat, _seatd, seatd, video — none exist on this system." >&2
     echo "  Find the real one with: getent group | grep -i seat" >&2
     echo "  then either add '$SERVICE_USER' to it yourself:" >&2
     echo "    usermod -aG <group> $SERVICE_USER" >&2
@@ -103,10 +124,19 @@ fi
 echo "Using seat group '$SEAT_GROUP' …"
 
 # vcgencmd needs /dev/vcio_gencmd, which udev grants to group 'video'.
-# Without this the System page's throttling tiles stay empty.
-echo "Adding '$SERVICE_USER' to groups 'video' and '$SEAT_GROUP' …"
-usermod -aG video "$SERVICE_USER"
-usermod -aG "$SEAT_GROUP" "$SERVICE_USER"
+# Without this the System page's throttling tiles stay empty. On systems
+# where seatd's own group *is* 'video' (e.g. Debian 13), that single
+# membership already covers both purposes — add it once, not twice, so
+# usermod isn't called redundantly and the generated unit below doesn't get
+# a duplicated group name.
+if [[ "$SEAT_GROUP" == "video" ]]; then
+    echo "Adding '$SERVICE_USER' to group 'video' (seatd's seat group on this system, also needed for vcgencmd) …"
+    usermod -aG video "$SERVICE_USER"
+else
+    echo "Adding '$SERVICE_USER' to groups 'video' and '$SEAT_GROUP' …"
+    usermod -aG video "$SERVICE_USER"
+    usermod -aG "$SEAT_GROUP" "$SERVICE_USER"
+fi
 
 echo "Configuring a ${ROTATE}° output transform for $OUTPUT …"
 # This has to live where the unit's HOME/XDG_CONFIG_HOME point (see
@@ -123,10 +153,19 @@ chown "$SERVICE_USER:$SERVICE_USER" "$CONSOLE_STATE_DIR/.config/labwc/autostart"
 chmod +x "$CONSOLE_STATE_DIR/.config/labwc/autostart"
 
 echo "Installing systemd service …"
+# When SEAT_GROUP is 'video', the membership above already covers both
+# purposes — write it once here too, so SupplementaryGroups= doesn't end up
+# listing the same group twice (harmless to systemd, but confusing to read).
+if [[ "$SEAT_GROUP" == "video" ]]; then
+    SUPPLEMENTARY_GROUPS="video"
+else
+    SUPPLEMENTARY_GROUPS="video $SEAT_GROUP"
+fi
+
 # Anchored to the specific directive lines, not a blind whole-file replace:
 # $SERVICE_FILE also *explains* the __SEAT_GROUP__ placeholder in a comment
 # above it, and an unanchored substitution corrupts that comment too.
-sed -e "s|^SupplementaryGroups=video __SEAT_GROUP__\$|SupplementaryGroups=video $SEAT_GROUP|" \
+sed -e "s|^SupplementaryGroups=video __SEAT_GROUP__\$|SupplementaryGroups=$SUPPLEMENTARY_GROUPS|" \
     -e "s|?lang=en'\$|?lang=$LANG_CODE'|" \
     "$SERVICE_FILE" > "/etc/systemd/system/$SERVICE_FILE"
 systemctl daemon-reload
@@ -138,7 +177,12 @@ echo "Console kiosk installed."
 echo "  systemctl status $SERVICE_FILE"
 echo "  journalctl -u $SERVICE_FILE -f"
 echo ""
-echo "The service user was added to groups 'video' and '$SEAT_GROUP'; the"
-echo "restart above already picks that up — systemd resolves group"
-echo "membership fresh each time it starts the service, unlike an"
-echo "interactive login session."
+if [[ "$SEAT_GROUP" == "video" ]]; then
+    echo "The service user was added to group 'video' (which also grants seat"
+    echo "access on this system); the restart above already picks that up —"
+else
+    echo "The service user was added to groups 'video' and '$SEAT_GROUP'; the"
+    echo "restart above already picks that up —"
+fi
+echo "systemd resolves group membership fresh each time it starts the"
+echo "service, unlike an interactive login session."
