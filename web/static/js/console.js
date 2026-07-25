@@ -4,6 +4,7 @@ const {
   fmt, timeOf, humanElapsed, degToCompass, formatBearing,
   moonEmoji, moonPhaseKey, MOON_PHASE_EN, TREND_ARROWS,
   rssiPct, dataAgeState, meanOver, windPointerState, calcDewPoint,
+  mergeReading, rainRate,
 } = WeatherCore;
 
 // ── Language ───────────────────────────────────────────────────────────────
@@ -23,6 +24,8 @@ const state = {
   today: null, rainTotals: null, solar: null, system: null, systemAt: null,
   windSamples: [],       // [{ t, v }] for the 10-minute mean
   connected: false,
+  lastTipAt: null,       // wall-clock ms of the last rain_tip_count increase;
+                          // in-memory only — unknown again after a restart.
 };
 
 // ── Pages ──────────────────────────────────────────────────────────────────
@@ -61,10 +64,12 @@ const PAGES = [
     } },
   { id: 'rain', title: 'Rain', age: 'outdoor', render: (root, s) => {
       const o = s.outdoor || {}, td = s.today || {}, tot = s.rainTotals || {};
-      // rain_secs is the interval between the last two tips; -1 means "no tip
-      // since the service started", which is empty, not broken.
-      const rate = o.rain_secs > 0 ? 720 / o.rain_secs : 0;
-      const since = o.rain_secs > 0 ? humanElapsed(o.rain_secs * 1000, tr) : '—';
+      // rain_secs is the interval between the last two tips, not the age of
+      // the last tip — the rate must decay off that age (s.lastTipAt), and
+      // "last tip" must show elapsed-since-tip, not that interval.
+      const msSinceTip = s.lastTipAt == null ? null : Date.now() - s.lastTipAt;
+      const rate = rainRate(o.rain_secs, msSinceTip);
+      const since = msSinceTip == null ? '—' : humanElapsed(msSinceTip, tr);
       root.innerHTML = `
         <div class="col" style="flex:1">
           <div class="tile" style="flex:0 0 250px">
@@ -105,7 +110,7 @@ const PAGES = [
       root.querySelector('.rose-tile').appendChild(
         buildRose(o.wind_direction, windPointerState(mean, ageMs), LANG));
     } },
-  { id: 'sun', title: 'Sun & moon', age: 'outdoor', render: (root, s) => {
+  { id: 'sun', title: 'Sun & moon', age: null, render: (root, s) => {
       const sol = s.solar;
       if (!sol) { root.innerHTML = `<div class="tile" style="flex:1"><div class="lbl">${tr('console.no_data', 'no data')}</div></div>`; return; }
       const ms = iso => new Date(iso).getTime();
@@ -173,13 +178,14 @@ const PAGES = [
   { id: 'status', title: 'Status', age: 'outdoor', render: (root, s) => {
       const o = s.outdoor || {}, td = s.today || {};
       const pct = Math.round(rssiPct(o.rssi));
+      const pctLabel = o.rssi == null ? '—' : `${pct} %`;
       const batt = o.battery_ok == null ? '—' : o.battery_ok ? tr('console.batt_ok', 'OK') : tr('console.batt_low', 'LOW');
       root.innerHTML = `
         <div class="col" style="flex:1">
           <div class="grid2" style="flex:1">
             ${tile(tr('cards.rssi', 'Signal (RSSI)'),
               `<div class="row" style="margin-top:10px"><span class="big em">${o.rssi ?? '—'}<span class="unit-s">dBm</span></span>
-               <span class="sub em">${pct} %</span></div>
+               <span class="sub em">${pctLabel}</span></div>
                <div class="bar"><i style="width:${pct}%;background:#10b981"></i></div>`,
               `${tr('console.today_range', 'today')} ${td.rssi_min ?? '—'} … ${td.rssi_max ?? '—'} dBm`)}
             ${tile(tr('cards.battery', 'ISS battery'),
@@ -207,6 +213,7 @@ const PAGES = [
         const one = (on, label) => `<span class="chip ${on ? 'warn' : 'ok'}">${label} <b>${on ? tr('console.yes', 'yes') : tr('console.no', 'no')}</b></span>`;
         return one(f.undervoltage, tr('console.voltage', 'Voltage'))
              + one(f.arm_freq_capped, tr('console.clock', 'Clock'))
+             + one(f.throttled, tr('console.throttled', 'Throttled'))
              + one(f.soft_temp_limit, tr('console.temp', 'Temp'));
       };
       root.innerHTML = `
@@ -285,13 +292,25 @@ function renderCurrent() {
 
 function updateAgeHeader() {
   const page = PAGES[current];
+  pageEls[current].classList.remove('fresh', 'aging', 'stale');
+  const ageDot = document.getElementById('age-dot');
+  const ageEl = document.getElementById('age');
+  // Solar times are computed astronomically and are never stale — a page
+  // with no age source (age: null) gets no clock, no dot, and no ageing
+  // class, rather than borrowing another sensor's freshness.
+  if (page.age == null) {
+    ageDot.style.display = 'none';
+    ageEl.style.display = 'none';
+    ageEl.textContent = '';
+    return;
+  }
+  ageDot.style.display = '';
+  ageEl.style.display = '';
   const at = page.age === 'indoor' ? state.indoorAt : page.age === 'system' ? state.systemAt : state.outdoorAt;
   const ageMs = at == null ? null : Date.now() - at;
   const st = dataAgeState(ageMs);
-  document.getElementById('age-dot').className = st === 'fresh' ? '' : st;
-  document.getElementById('age').textContent =
-    ageMs == null ? tr('console.no_data', 'no data') : humanElapsed(ageMs, tr);
-  pageEls[current].classList.remove('fresh', 'aging', 'stale');
+  ageDot.className = st === 'fresh' ? '' : st;
+  ageEl.textContent = ageMs == null ? tr('console.no_data', 'no data') : humanElapsed(ageMs, tr);
   pageEls[current].classList.add(st);
 }
 
@@ -308,6 +327,10 @@ function goTo(index, direction) {
   current = next;
   renderCurrent();
   to.classList.add('active');
+  // Automatic advance is a cross-fade: the incoming page gets 'fade' too, so
+  // it eases in over 180ms instead of popping in at full opacity. Swipe
+  // (direction !== 0) is unchanged — it slides and needs no fade on `to`.
+  if (direction === 0) to.classList.add('fade');
   setTimeout(() => {
     // Remove only the transition classes this call added — never reset the
     // whole className. A second goTo() may have already made `from` the
@@ -315,7 +338,7 @@ function goTo(index, direction) {
     // class via updateAgeHeader) before this timeout fires; a blanket
     // `from.className = 'page'` would silently strip that.
     from.classList.remove('fade', 'slide', 'out-left', 'out-right');
-    to.classList.remove('slide', 'out-left', 'out-right');
+    to.classList.remove('slide', 'out-left', 'out-right', 'fade');
   }, 220);
   dotsEl.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('on', i === current));
 }
@@ -458,8 +481,12 @@ let es = null;
 let backoff = 1000;
 
 function mergeOutdoor(d) {
-  state.outdoor = Object.assign({}, state.outdoor, d);
+  const prevTipCount = state.outdoor ? state.outdoor.rain_tip_count : null;
+  state.outdoor = mergeReading(state.outdoor, d);
   state.outdoorAt = Date.now();
+  if (d.rain_tip_count != null && prevTipCount != null && d.rain_tip_count > prevTipCount) {
+    state.lastTipAt = Date.now();
+  }
   if (d.wind_speed != null) {
     state.windSamples.push({ t: Date.now(), v: d.wind_speed });
     // Keep the array bounded: a 10-minute window never needs more than this.
