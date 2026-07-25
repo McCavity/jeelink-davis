@@ -105,7 +105,50 @@ const PAGES = [
       root.querySelector('.rose-tile').appendChild(
         buildRose(o.wind_direction, windPointerState(mean, ageMs), LANG));
     } },
-  { id: 'sun',    title: 'Sun & moon',  age: 'outdoor', render: root => { root.innerHTML = '<div class="tile" style="flex:1"><div class="lbl">Sun</div></div>'; } },
+  { id: 'sun', title: 'Sun & moon', age: 'outdoor', render: (root, s) => {
+      const sol = s.solar;
+      if (!sol) { root.innerHTML = `<div class="tile" style="flex:1"><div class="lbl">${tr('console.no_data', 'no data')}</div></div>`; return; }
+      const ms = iso => new Date(iso).getTime();
+      const span = ms(sol.dusk) - ms(sol.dawn);
+      const pos = v => Math.max(0, Math.min(100, ((ms(v) - ms(sol.dawn)) / span) * 100));
+      const nowPct = Math.max(0, Math.min(100, ((Date.now() - ms(sol.dawn)) / span) * 100));
+      const dayMs = ms(sol.sunset) - ms(sol.sunrise);
+      const hhmm = m => `${Math.floor(m / 60)}:${String(Math.round(m % 60)).padStart(2, '0')}`;
+      const marks = [
+        [sol.dawn, '🌒', tr('solar.dawn', 'Dawn')], [sol.sunrise, '🌅', tr('solar.sunrise', 'Sunrise')],
+        [sol.noon, '☀️', tr('solar.noon', 'Noon')], [sol.sunset, '🌇', tr('solar.sunset', 'Sunset')],
+        [sol.dusk, '🌘', tr('solar.dusk', 'Dusk')],
+      ];
+      const key = moonPhaseKey(sol.moon_phase);
+      root.innerHTML = `
+        <div class="col" style="flex:1">
+          <div class="tile" style="flex:1">
+            <div class="lbl">${tr('console.day_arc', 'Day arc')}</div>
+            <div style="position:relative;height:118px;margin:26px 10px 0">
+              <div style="position:absolute;top:52px;left:0;right:0;height:5px;border-radius:3px;
+                          background:linear-gradient(90deg,#1e293b 0%,#1e293b 8%,#fbbf24 22%,#fde68a 50%,#fb923c 78%,#1e293b 92%,#1e293b 100%)"></div>
+              ${marks.map(([iso, icon, label]) => `
+                <div style="position:absolute;top:0;left:${pos(iso)}%;transform:translateX(-50%);width:150px;text-align:center">
+                  <div style="font-size:30px;line-height:1">${icon}</div>
+                  <div style="font-size:27px;margin-top:26px;font-weight:500;font-variant-numeric:tabular-nums">${timeOf(iso, LOCALE)}</div>
+                  <div style="font-size:17px;color:#64748b;text-transform:uppercase;letter-spacing:.06em">${label}</div>
+                </div>`).join('')}
+              <div style="position:absolute;top:34px;left:${nowPct}%;width:4px;height:40px;background:#34d399;border-radius:2px;transform:translateX(-50%)"></div>
+            </div>
+          </div>
+          <div class="grid2" style="flex:0 0 230px">
+            ${tile(tr('solar.moon', 'Moon'),
+              `<div class="row" style="margin-top:12px">
+                 <span style="font-size:76px;line-height:1">${moonEmoji(sol.moon_phase)}</span>
+                 <span><span class="med orange" style="font-size:46px">${fmt(sol.moon_phase, 1)}<span class="unit-s">d</span></span>
+                 <div class="sub-d">${tr('moon_phases.' + key, MOON_PHASE_EN[key])}</div></span>
+               </div>`, '')}
+            ${tile(tr('console.day_length', 'Day length'),
+              `<span class="big amber">${hhmm(dayMs / 60000)}<span class="unit-s">h</span></span>`,
+              `${tr('console.until_sunset', 'until sunset')} ${hhmm(Math.max(0, (ms(sol.sunset) - Date.now()) / 60000))}`)}
+          </div>
+        </div>`;
+    } },
   { id: 'indoor', title: 'Indoor', age: 'indoor', render: (root, s) => {
       const i = s.indoor || {};
       root.innerHTML = `
@@ -127,7 +170,31 @@ const PAGES = [
             '', { style: 'flex:0 0 150px' })}
         </div>`;
     } },
-  { id: 'status', title: 'Status',      age: 'outdoor', render: root => { root.innerHTML = '<div class="tile" style="flex:1"><div class="lbl">Status</div></div>'; } },
+  { id: 'status', title: 'Status', age: 'outdoor', render: (root, s) => {
+      const o = s.outdoor || {}, td = s.today || {};
+      const pct = Math.round(rssiPct(o.rssi));
+      const batt = o.battery_ok == null ? '—' : o.battery_ok ? tr('console.batt_ok', 'OK') : tr('console.batt_low', 'LOW');
+      root.innerHTML = `
+        <div class="col" style="flex:1">
+          <div class="grid2" style="flex:1">
+            ${tile(tr('cards.rssi', 'Signal (RSSI)'),
+              `<div class="row" style="margin-top:10px"><span class="big em">${o.rssi ?? '—'}<span class="unit-s">dBm</span></span>
+               <span class="sub em">${pct} %</span></div>
+               <div class="bar"><i style="width:${pct}%;background:#10b981"></i></div>`,
+              `${tr('console.today_range', 'today')} ${td.rssi_min ?? '—'} … ${td.rssi_max ?? '—'} dBm`)}
+            ${tile(tr('cards.battery', 'ISS battery'),
+              `<span class="big ${o.battery_ok === false ? 'red' : 'em'}">${batt}</span>`, '')}
+          </div>
+          <div class="grid2" style="flex:1">
+            ${tile(tr('console.last_reading', 'Last reading'),
+              `<span class="big slate" style="font-size:76px">${s.outdoorAt ? timeOf(new Date(s.outdoorAt).toISOString(), LOCALE) : '—'}</span>`,
+              `${tr('console.channel', 'channel')} ${o.channel ?? '—'} · ${tr('console.station', 'station')} ${o.station_id ?? '—'}`)}
+            ${tile(tr('console.connection', 'Connection'),
+              `<span class="big ${s.connected ? 'em' : 'red'}" style="font-size:60px">${s.connected ? tr('console.live', 'live') : tr('console.reconnecting', 'reconnecting')}</span>`,
+              `${tr('console.tips_today', 'tips')} ${o.rain_tip_count ?? '—'}`)}
+          </div>
+        </div>`;
+    } },
   { id: 'system', title: 'System',      age: 'system',  render: root => { root.innerHTML = '<div class="tile" style="flex:1"><div class="lbl">System</div></div>'; } },
 ];
 
