@@ -11,8 +11,9 @@
 #   - Creates a venv and installs all web dependencies
 #   - Installs and enables the davis-weather systemd service
 #
-# config.toml is copied on first deploy but never overwritten on re-runs,
-# so your production settings are always preserved.
+# config.toml is never touched by the sync below, so your production
+# settings are always preserved — create it in $INSTALL_DIR yourself
+# (from config.toml.example) after the first deploy.
 
 set -euo pipefail
 
@@ -75,14 +76,16 @@ rsync -a --delete \
     --exclude='__pycache__/' \
     --exclude='*.egg-info/' \
     --exclude='.pytest_cache/' \
+    --exclude='config.toml' \
     ./ "$INSTALL_DIR/"
 
-# Preserve production config if it already exists (re-deploy scenario)
+# config.toml is gitignored, so the source tree never carries one — without
+# the --exclude above, --delete would remove an existing production config on
+# every re-run. Report which case actually applies.
 if [[ -f "$INSTALL_DIR/config.toml" ]]; then
-    echo "config.toml already exists in $INSTALL_DIR — keeping existing production config."
-    cp ./ "$INSTALL_DIR/" 2>/dev/null || true  # no-op, rsync already ran
+    echo "config.toml already exists in $INSTALL_DIR — left untouched (excluded from the sync above)."
 else
-    echo "Copying config.toml — edit $INSTALL_DIR/config.toml before starting the service."
+    echo "No config.toml in $INSTALL_DIR yet — copy config.toml.example there and edit it before starting the service."
 fi
 
 # ---------------------------------------------------------------------------
