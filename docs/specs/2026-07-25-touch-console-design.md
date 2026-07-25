@@ -218,8 +218,23 @@ The third state is not cosmetic. Without it, "calm" and "the station has gone
 silent" look identical, and the console would report a flat calm while nothing
 has been received for an hour.
 
-**Calm threshold:** direction varies by less than ±3° **and** wind speed stays
-below 0.3 m/s, both continuously for 10 minutes.
+**Calm threshold: a 10-minute mean wind speed of 0.2 m/s or less.**
+
+This is not an invented number. WMO defines calm as 0.2 m/s (CIMO guide; see
+*The Weather Observer's Handbook*, ch. 9), and it defines wind itself as a
+10-minute mean — so the averaging window is the standard one rather than a
+guess. For comparison, METAR reports calm below 0.5 m/s (1 kt).
+
+An earlier draft triggered on *direction standing still*. That was the wrong
+criterion: a vane in still air is just as likely to wander as to sit, so the
+rule caught only half of the cases it was meant to. METAR makes the same
+distinction from the other side — it declares direction unusable (`VRB`) below
+1.5 m/s mean speed. Measuring the speed directly is both simpler and standard.
+
+One honesty note: the WMO figure assumes a 10 m mast in the open. A station
+sheltered by buildings or trees is not comparable to a synoptic observation in
+absolute terms. What is borrowed here is the threshold's definition, not a
+claim that the readings are WMO-grade.
 
 *A note on what the 1° graduation can and cannot do.* At 560 px the rose is
 about 68 mm across, so its circumference is ≈ 213 mm and consecutive 1° ticks
