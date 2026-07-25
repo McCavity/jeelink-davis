@@ -679,7 +679,13 @@ function goTo(index, direction) {
   renderCurrent();
   to.classList.add('active');
   setTimeout(() => {
-    from.className = 'page';
+    // Remove only the transition classes this call added — never reset the
+    // whole className. A second goTo() may have already made `from` the
+    // incoming page again (and re-added 'active', or a fresh/aging/stale
+    // class via updateAgeHeader) before this timeout fires; a blanket
+    // `from.className = 'page'` would silently strip that and leave the
+    // stage showing no page at all on a rapid reverse swipe.
+    from.classList.remove('fade', 'slide', 'out-left', 'out-right');
     to.classList.remove('slide', 'out-left', 'out-right');
   }, 220);
   dotsEl.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('on', i === current));
@@ -763,7 +769,7 @@ git commit -m "feat: console route, document shell and seven-page carousel"
 
 **Interfaces:**
 - Consumes: `state`, `PAGES`, `renderCurrent`, `tr` from Task 3.
-- Produces: `connectStream()`, `pollAll()`, `tile(label, body, sub, cls)` (returns an HTML string), and a populated `state`. Later page tasks use `tile()` and read `state`.
+- Produces: `connectStream()`, `startPolling()`, `getJSON(url)`, `tile(label, body, sub, opts)` (returns an HTML string; `opts` takes `{cls}` and/or `{style}`), and a populated `state`. Later page tasks use `tile()` and read `state`.
 
 - [ ] **Step 1: Add the tile helper and the data layer**
 
@@ -1174,8 +1180,11 @@ Replace the `sun` entry in `PAGES`:
       if (!sol) { root.innerHTML = `<div class="tile" style="flex:1"><div class="lbl">${tr('console.no_data', 'no data')}</div></div>`; return; }
       const ms = iso => new Date(iso).getTime();
       const span = ms(sol.dusk) - ms(sol.dawn);
-      const pos = v => Math.max(0, Math.min(100, ((ms(v) - ms(sol.dawn)) / span) * 100));
-      const nowPct = Math.max(0, Math.min(100, ((Date.now() - ms(sol.dawn)) / span) * 100));
+      // Guard on span > 0: when dusk equals dawn the division is 0/0, and
+      // Math.min/Math.max propagate NaN rather than clamping it — the marker
+      // would render style="left:NaN%", which the browser silently drops.
+      const pos = v => span > 0 ? Math.max(0, Math.min(100, ((ms(v) - ms(sol.dawn)) / span) * 100)) : 0;
+      const nowPct = span > 0 ? Math.max(0, Math.min(100, ((Date.now() - ms(sol.dawn)) / span) * 100)) : 0;
       const dayMs = ms(sol.sunset) - ms(sol.sunrise);
       const hhmm = m => `${Math.floor(m / 60)}:${String(Math.round(m % 60)).padStart(2, '0')}`;
       const marks = [
@@ -1437,6 +1446,10 @@ def read_system() -> dict:
     except OSError:
         load = None
 
+    # Each field is guarded on its own, narrowly. A malformed line raises
+    # IndexError or ValueError, not just OSError, and disk_usage can fail too —
+    # any of them unguarded would break the promise that one unreadable value
+    # degrades to null instead of failing the whole request.
     mem_total = mem_available = None
     try:
         with open("/proc/meminfo") as fh:
@@ -1445,11 +1458,19 @@ def read_system() -> dict:
                     mem_total = int(line.split()[1]) // 1024
                 elif line.startswith("MemAvailable:"):
                     mem_available = int(line.split()[1]) // 1024
-    except OSError:
-        pass
+    except (OSError, IndexError, ValueError):
+        mem_total = mem_available = None
 
-    usage = shutil.disk_usage("/")
+    try:
+        usage = shutil.disk_usage("/")
+    except OSError:
+        usage = None
+
     uptime_line = _read_first_line("/proc/uptime")
+    try:
+        uptime_s = int(float(uptime_line.split()[0])) if uptime_line else None
+    except (IndexError, ValueError):
+        uptime_s = None
 
     throttle_out = _vcgencmd("get_throttled")
     throttle = None
@@ -1468,9 +1489,9 @@ def read_system() -> dict:
         "cpu_count": os.cpu_count() or 1,
         "mem_total_mb": mem_total,
         "mem_used_mb": (mem_total - mem_available) if (mem_total and mem_available) else None,
-        "disk_total_gb": round(usage.total / 1e9, 1),
-        "disk_used_gb": round(usage.used / 1e9, 1),
-        "uptime_s": int(float(uptime_line.split()[0])) if uptime_line else None,
+        "disk_total_gb": round(usage.total / 1e9, 1) if usage else None,
+        "disk_used_gb": round(usage.used / 1e9, 1) if usage else None,
+        "uptime_s": uptime_s,
         "core_clock_hz": int(clock) if clock else None,
         "core_volts": round(volts, 3) if volts else None,
         "throttle": throttle,
@@ -1616,6 +1637,57 @@ Compare the displayed values against the host: `uptime`, `free -m`, `df -h /`, `
 ```bash
 git add web/static/js/console.js
 git commit -m "feat: console system page, polled only while visible"
+```
+
+---
+
+### Task 9b: Locale keys for the console
+
+Added during execution — the original plan had no task for it, and review found
+the gap. Every console string calls `tr('console.…')` or `tr('cards.…')`, but
+those keys were never added to the locale files, so `?lang=de` produced a
+console that stayed English while its compass points localised. The spec
+requires the console to read the same locale files as the dashboard.
+
+**Files:**
+- Modify: `web/static/i18n/en.json`
+- Modify: `web/static/i18n/de.json`
+
+**Interfaces:**
+- Consumes: every `tr()` key used by `web/static/js/console.js`.
+- Produces: nothing in code.
+
+- [ ] **Step 1: Inventory the keys**
+
+Collect every key from every `tr(path, fallback)` call in `console.js` —
+including the calls inside template literals and inside the rose builder, and
+the dynamic `console.<page id>` titles. For each, record the inline English
+fallback the code already passes.
+
+- [ ] **Step 2: Add them to both files**
+
+Add only the missing keys, using the code's own fallback as the English value
+so English behaviour is unchanged. Leave `cards.*` keys that already exist
+untouched — the dashboard owns their wording. Preserve each file's existing
+indentation and ordering conventions; do not reformat.
+
+- [ ] **Step 3: Prove the coverage, and prove the check**
+
+Write a throwaway script that walks every key used by `console.js` and asserts
+it resolves in both files. Run it. Then delete one key on purpose and confirm
+the script reports it missing — a checker that has never failed proves nothing.
+Restore the key and re-run.
+
+- [ ] **Step 4: Confirm additions only**
+
+`git diff` on both files must show additions (plus the trailing commas that
+additions require), never a changed value.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add web/static/i18n/en.json web/static/i18n/de.json
+git commit -m "i18n: add the console's locale keys"
 ```
 
 ---
@@ -1840,6 +1912,24 @@ the page on screen, not from the one that was showing when it was interrupted.
 `sudo systemctl stop davis-weather`, wait 10 minutes. Expected: values grey out,
 header reads "no data", and the wind pointer is **grey, not red**. Then start
 the service again and confirm recovery.
+
+- [ ] **Step 7b: Check the three things only the hardware can answer**
+
+These came out of the code reviews during execution. Each is invisible to any
+static check, so they are listed here rather than left to chance.
+
+- **Clock timezone.** The console's clock comes from `toLocaleTimeString`
+  without an explicit timezone, so it renders in the host's system timezone —
+  not the offset carried in the API's ISO strings. Compare the console's clock
+  against `date` on the machine and against the solar times, and fix the host's
+  timezone if they disagree.
+- **The System page's CORE column** is 300 px wide and holds two chips (clock
+  and voltage). Their combined width may exceed it. Because the body is
+  `overflow: hidden`, an overflow would clip silently rather than announce
+  itself — look at that column specifically.
+- **The Rain page's "last tip"** only shows a value once a tip has been
+  recorded since the service started. If it reads `—`, confirm that is because
+  it has not rained, not because the field is broken.
 
 - [ ] **Step 8: Record what could not be tested**
 
