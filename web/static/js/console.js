@@ -195,7 +195,57 @@ const PAGES = [
           </div>
         </div>`;
     } },
-  { id: 'system', title: 'System',      age: 'system',  render: root => { root.innerHTML = '<div class="tile" style="flex:1"><div class="lbl">System</div></div>'; } },
+  { id: 'system', title: 'System', age: 'system', render: (root, s) => {
+      const y = s.system || {};
+      const memPct = y.mem_total_mb && y.mem_used_mb != null ? Math.round(y.mem_used_mb / y.mem_total_mb * 100) : 0;
+      const diskPct = y.disk_total_gb ? Math.round(y.disk_used_gb / y.disk_total_gb * 100) : 0;
+      const tempPct = y.cpu_temp_c != null ? Math.max(0, Math.min(100, y.cpu_temp_c / 80 * 100)) : 0;
+      const up = y.uptime_s != null ? `${Math.floor(y.uptime_s / 3600)}:${String(Math.floor(y.uptime_s % 3600 / 60)).padStart(2, '0')}` : '—';
+      const flags = (half) => {
+        if (!y.throttle) return `<span class="chip">${tr('console.unavailable', 'unavailable')}</span>`;
+        const f = y.throttle[half];
+        const one = (on, label) => `<span class="chip ${on ? 'warn' : 'ok'}">${label} <b>${on ? tr('console.yes', 'yes') : tr('console.no', 'no')}</b></span>`;
+        return one(f.undervoltage, tr('console.voltage', 'Voltage'))
+             + one(f.arm_freq_capped, tr('console.clock', 'Clock'))
+             + one(f.soft_temp_limit, tr('console.temp', 'Temp'));
+      };
+      root.innerHTML = `
+        <div class="col" style="flex:1">
+          <div style="display:flex;gap:22px;flex:1;min-height:0">
+            <div class="tile" style="flex:0 0 520px">
+              <div class="lbl">${tr('console.cpu_temp', 'CPU temperature')}</div>
+              <div class="huge em value" style="font-size:150px;margin-top:12px">${fmt(y.cpu_temp_c, 1)}<span class="unit">°C</span></div>
+              <div class="bar" style="height:22px;margin-top:22px"><i style="width:${tempPct}%;background:linear-gradient(90deg,#10b981,#34d399 60%,#fbbf24 100%)"></i></div>
+              <div class="sub-d" style="margin-top:12px;display:flex;justify-content:space-between"><span>${tr('console.soft_limit', 'Soft limit')} 60 °C</span><span>${tr('console.hard_limit', 'Hard')} 80 °C</span></div>
+            </div>
+            <div class="grid2" style="flex:1">
+              ${tile(tr('console.load', 'Load (1/5/15)'),
+                `<span class="med slate">${y.load ? y.load[0].toFixed(2) : '—'}</span>`,
+                y.load ? `${y.load[1].toFixed(2)} · ${y.load[2].toFixed(2)} — ${y.cpu_count} ${tr('console.cores', 'cores')}` : '')}
+              ${tile(tr('console.memory', 'Memory'),
+                `<span class="med violet">${y.mem_used_mb ?? '—'}<span class="unit-s">MB</span></span>
+                 <div class="bar"><i style="width:${memPct}%;background:#7c3aed"></i></div>`,
+                `${tr('console.of', 'of')} ${y.mem_total_mb ?? '—'} MB · ${memPct} %`)}
+              ${tile(tr('console.disk', 'Storage'),
+                `<span class="med blue">${fmt(y.disk_used_gb, 1)}<span class="unit-s">GB</span></span>
+                 <div class="bar"><i style="width:${diskPct}%;background:#2563eb"></i></div>`,
+                `${tr('console.of', 'of')} ${fmt(y.disk_total_gb, 1)} GB · ${diskPct} %`)}
+              ${tile(tr('console.uptime', 'Uptime'), `<span class="med amber">${up}<span class="unit-s">h</span></span>`, '')}
+            </div>
+          </div>
+          <div class="tile" style="flex:0 0 168px">
+            <div class="lbl">${tr('console.throttling', 'Throttling')}</div>
+            <div style="display:flex;gap:40px;margin-top:16px">
+              <div style="flex:1"><div class="sub-d" style="margin-bottom:10px">${tr('console.now', 'NOW')}</div><div class="chips">${flags('now')}</div></div>
+              <div style="flex:1"><div class="sub-d" style="margin-bottom:10px">${tr('console.since_boot', 'SINCE BOOT')}</div><div class="chips">${flags('ever')}</div></div>
+              <div style="flex:0 0 300px"><div class="sub-d" style="margin-bottom:10px">${tr('console.core', 'CORE')}</div>
+                <div class="chips"><span class="chip">${tr('console.clock', 'Clock')} <b>${y.core_clock_hz ? (y.core_clock_hz / 1e9).toFixed(2) + ' GHz' : '—'}</b></span>
+                <span class="chip">${tr('console.voltage', 'Voltage')} <b>${y.core_volts != null ? y.core_volts.toFixed(3) + ' V' : '—'}</b></span></div>
+              </div>
+            </div>
+          </div>
+        </div>`;
+    } },
 ];
 
 const DWELL_MS  = 15_000;
@@ -230,6 +280,7 @@ function renderCurrent() {
   page.render(el, state);
   document.getElementById('page-title').textContent = tr('console.' + page.id, page.title).toUpperCase();
   updateAgeHeader();
+  syncSystemPolling();
 }
 
 function updateAgeHeader() {
@@ -461,6 +512,19 @@ function startPolling() {
   pollIndoor(); setInterval(pollIndoor, 30_000);
   pollSlow();   setInterval(pollSlow, 60_000);
   pollSolar();  setInterval(pollSolar, 900_000);
+}
+
+// The System page is the only one whose endpoint costs a subprocess, so it is
+// polled only while it is on screen.
+let systemTimer = null;
+async function pollSystem() {
+  const d = await getJSON('/api/system');
+  if (d) { state.system = d; state.systemAt = Date.now(); renderCurrent(); }
+}
+function syncSystemPolling() {
+  const visible = PAGES[current].id === 'system';
+  if (visible && !systemTimer) { pollSystem(); systemTimer = setInterval(pollSystem, 10_000); }
+  if (!visible && systemTimer) { clearInterval(systemTimer); systemTimer = null; }
 }
 
 // ── Nightly hygiene reload, guarded ────────────────────────────────────────
