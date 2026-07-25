@@ -34,7 +34,9 @@ To run it full-screen on the machine itself, as an optional kiosk display:
 sudo ./install-console.sh --lang en --rotate 270
 ```
 
-This installs `labwc` (Wayland compositor), `chromium` and `seatd`, and
+This installs `labwc` (Wayland compositor), `chromium`, `seatd`, `curl`
+(used by the service's startup readiness check) and `fonts-noto-color-emoji`
+(so the Sun & moon page's sun/moon glyphs render instead of tofu boxes), and
 enables `seatd.service` — a small seat-management daemon that lets the
 service user reach the GPU and touch input without a login session or root.
 It also adds the service user to group `video` (so `vcgencmd` can report

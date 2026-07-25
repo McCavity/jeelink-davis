@@ -76,9 +76,9 @@ if [[ ! "$OUTPUT" =~ ^[A-Za-z0-9-]+$ ]]; then
     exit 1
 fi
 
-echo "Installing labwc, wlr-randr, chromium and seatd …"
+echo "Installing labwc, wlr-randr, chromium, seatd, curl and a colour emoji font …"
 apt-get update -qq
-apt-get install -y --no-install-recommends labwc wlr-randr chromium seatd
+apt-get install -y --no-install-recommends labwc wlr-randr chromium seatd curl fonts-noto-color-emoji
 
 echo "Enabling seatd …"
 systemctl enable --now seatd.service
