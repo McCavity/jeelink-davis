@@ -110,8 +110,8 @@ const PAGES = [
       if (!sol) { root.innerHTML = `<div class="tile" style="flex:1"><div class="lbl">${tr('console.no_data', 'no data')}</div></div>`; return; }
       const ms = iso => new Date(iso).getTime();
       const span = ms(sol.dusk) - ms(sol.dawn);
-      const pos = v => Math.max(0, Math.min(100, ((ms(v) - ms(sol.dawn)) / span) * 100));
-      const nowPct = Math.max(0, Math.min(100, ((Date.now() - ms(sol.dawn)) / span) * 100));
+      const pos = v => span > 0 ? Math.max(0, Math.min(100, ((ms(v) - ms(sol.dawn)) / span) * 100)) : 0;
+      const nowPct = span > 0 ? Math.max(0, Math.min(100, ((Date.now() - ms(sol.dawn)) / span) * 100)) : 0;
       const dayMs = ms(sol.sunset) - ms(sol.sunrise);
       const hhmm = m => `${Math.floor(m / 60)}:${String(Math.round(m % 60)).padStart(2, '0')}`;
       const marks = [
