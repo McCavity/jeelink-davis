@@ -94,6 +94,7 @@ Was hier geht, hängt stark vom Plan ab:
 | Sperrdauer | nur 10 s | bis 1 h | bis 1 Tag |
 | Gecachte Treffer ausnehmen | nein | nein | ja |
 | Zähl-Merkmal | IP | IP | IP, IP mit NAT-Unterstützung |
+| Eigene Fehlerantwort | **nein** | ja | ja |
 
 Regel für den Free-Plan:
 
@@ -103,20 +104,42 @@ starts_with(http.request.uri.path, "/api/")
 
 | Feld | Wert |
 |---|---|
-| Characteristics | IP |
+| Characteristics | IP (im Free-Plan fest, das Feld ist ausgegraut) |
 | When rate exceeds | 30 requests / 10 seconds |
-| Action | Managed Challenge |
+| Action | **Block** |
 | Duration | 10 s |
 
-Zwei Punkte, die man kennen muß:
+### Warum Block und nicht Managed Challenge
+
+Naheliegend wäre eine Challenge: ein Fehlalarm kostet dann einen Klick statt
+den Zugang. Auf diesem Pfad ist das aber falsch.
+
+`/api/*` wird **nicht von einem Menschen aufgerufen**, sondern vom eigenen
+Dashboard per `fetch` aus JavaScript. Eine Challenge antwortet mit einer
+HTML-Zwischenseite. Code, der JSON erwartet, kann damit nichts anfangen — die
+Kacheln blieben leer, ohne verwertbare Fehlermeldung. Ein Statuscode ist für
+einen API-Pfad das ehrliche Signal.
+
+### Was im Free-Plan dabei fehlt
+
+Zu einer Block-Aktion läßt sich normalerweise eine **eigene Antwort**
+konfigurieren (Typ, Statuscode, Rumpf) — für einen API-Pfad wäre das ein
+sauberes `429` mit JSON-Rumpf. Diese Einstellung gibt es laut Cloudflare erst
+**ab Pro**; im Free-Plan erscheint der Abschnitt im Dialog gar nicht erst.
+
+Praktische Folge: Beim Überschreiten liefert Cloudflare seine
+Standard-Fehlerseite in HTML. Träfe das eigene Frontend darauf, bliebe es
+stumm stehen. **Deshalb die Schwelle großzügig lassen** — 30 Anfragen pro
+10 Sekunden, nicht weniger.
+
+Zwei weitere Punkte, die man kennen muß:
 
 * Auf Free und Pro zählen **auch gecachte Treffer** mit. Die eigene
   Dashboard-Nutzung schlägt also ebenfalls auf das Zählwerk.
 * Gezählt wird **pro IP**. Hinter einem Anschluß-NAT teilen sich alle Geräte
   eines Haushalts ein Zählwerk.
 
-Deshalb 30 statt 10, und **Managed Challenge statt Block** — ein Fehlalarm
-kostet dann einen Klick und nicht den Zugang.
+Beides spricht ebenfalls für 30 statt 10.
 
 ## 3. cloudflared aktuell halten
 
