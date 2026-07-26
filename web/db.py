@@ -55,6 +55,53 @@ CREATE INDEX IF NOT EXISTS idx_indoor_ts ON indoor_readings (timestamp);
 """
 
 
+# ── Local-day → UTC range bounds ───────────────────────────────────────────
+#
+# The day/range filters used to read `WHERE date(timestamp, 'localtime') = ?`.
+# That applies a function to the indexed column, so SQLite cannot use
+# idx_readings_timestamp and scans all ~3.5 M rows instead (measured 2026-07-26:
+# 4.1 s for the daily min/max, 3.9 s for the day buckets). Expressed as a
+# half-open range over the raw column the same queries return the same rows in
+# 15 ms and 28 ms — SEARCH instead of SCAN.
+#
+# The bounds are computed by SQLite's own 'utc' modifier rather than in Python,
+# so they come from exactly the timezone database that 'localtime' uses in the
+# surviving GROUP BY expressions. There is deliberately no second source of
+# truth: [station].timezone is NOT used here, because it may differ from the OS
+# zone that 'localtime' honours (the shipped example says Europe/London while
+# the station runs Europe/Berlin), which would silently shift day boundaries.
+# Verified 2026-07-26 against both switch days: 2026-10-25 yields a 25-hour day,
+# 2026-03-29 a 23-hour day.
+#
+# The two tables store timestamps in different *lexical* formats, both UTC:
+#     readings.timestamp         '2026-07-26T09:03:03.597292+00:00'
+#     indoor_readings.timestamp  '2026-07-26 09:26:33'
+# The comparison is a string comparison, so a bound in the wrong format matches
+# the wrong rows *silently*: ' ' sorts before 'T', so a space-separated bound
+# would admit every 'T' row of the same date regardless of its time. Always pass
+# the format constant belonging to the table being queried.
+_TS_FMT_READINGS = "%Y-%m-%dT%H:%M:%S"   # readings
+_TS_FMT_INDOOR   = "%Y-%m-%d %H:%M:%S"   # indoor_readings
+
+
+def _local_day_bounds(con, start_day: str, end_day: str, fmt: str) -> tuple[str, str]:
+    """
+    Return ``(start, end)`` UTC bounds for the *inclusive* local date range
+    [start_day, end_day], to be used as ``timestamp >= start AND timestamp < end``.
+
+    The upper bound is local midnight *after* end_day, i.e. the range is
+    half-open. Bounds are truncated to whole seconds; that is safe for both
+    formats because the stored strings share the bound's prefix and are never
+    shorter, so a row exactly at the upper bound still sorts after it.
+    """
+    row = con.execute(
+        "SELECT strftime(?1, ?2 || ' 00:00:00', 'utc'),"
+        "       strftime(?1, date(?3, '+1 day') || ' 00:00:00', 'utc')",
+        (fmt, start_day, end_day),
+    ).fetchone()
+    return row[0], row[1]
+
+
 def init_db(path: Path) -> None:
     """Create the database file, schema, and index if they don't exist."""
     global _db_path
@@ -165,6 +212,8 @@ def query_recent(n: int) -> list[dict]:
 def query_today_minmax() -> dict:
     """Return today's min/max/max-gust and rain total (tip delta * 0.2 mm)."""
     con = _get_connection()
+    today = date.today().isoformat()
+    lo, hi = _local_day_bounds(con, today, today, _TS_FMT_READINGS)
     row = con.execute(
         """
         WITH rain AS (
@@ -175,7 +224,7 @@ def query_today_minmax() -> dict:
                 SELECT rain_tip_count
                        - LAG(rain_tip_count) OVER (ORDER BY timestamp) AS tip_delta
                 FROM readings
-                WHERE date(timestamp, 'localtime') = date('now', 'localtime')
+                WHERE timestamp >= ? AND timestamp < ?
                   AND rain_tip_count IS NOT NULL
             )
             WHERE tip_delta IS NOT NULL
@@ -192,8 +241,9 @@ def query_today_minmax() -> dict:
             MAX(rssi)           AS rssi_max,
             (SELECT rain_mm FROM rain) AS rain_mm
         FROM readings
-        WHERE date(timestamp, 'localtime') = date('now', 'localtime')
+        WHERE timestamp >= ? AND timestamp < ?
         """,
+        (lo, hi, lo, hi),
     ).fetchone()
     if row is None:
         return {}
@@ -221,6 +271,7 @@ def query_day_bucketed(day: str = "today") -> list[dict]:
         target = day
 
     con = _get_connection()
+    lo, hi = _local_day_bounds(con, target, target, _TS_FMT_READINGS)
     rows = con.execute(
         """
         SELECT
@@ -229,12 +280,12 @@ def query_day_bucketed(day: str = "today") -> list[dict]:
                 AS minute_bucket,
             ROUND(AVG(temperature), 2) AS temperature
         FROM readings
-        WHERE date(timestamp, 'localtime') = ?
+        WHERE timestamp >= ? AND timestamp < ?
           AND temperature IS NOT NULL
         GROUP BY minute_bucket
         ORDER BY minute_bucket
         """,
-        (target,),
+        (lo, hi),
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -285,6 +336,7 @@ def query_range_bucketed(start: str, end: str) -> dict:
     r_bucket_sql = bucket_sql.replace("timestamp", "r.timestamp")
 
     con = _get_connection()
+    lo, hi = _local_day_bounds(con, start, end, _TS_FMT_READINGS)
     rows = con.execute(
         f"""
         WITH rain_deltas AS (
@@ -296,7 +348,7 @@ def query_range_bucketed(start: str, end: str) -> dict:
                     ELSE rain_tip_count + 128 - LAG(rain_tip_count) OVER w
                 END AS tip_delta
             FROM readings
-            WHERE date(timestamp, 'localtime') BETWEEN ? AND ?
+            WHERE timestamp >= ? AND timestamp < ?
               AND rain_tip_count IS NOT NULL
             WINDOW w AS (
                 PARTITION BY date(timestamp, 'localtime')
@@ -314,11 +366,11 @@ def query_range_bucketed(start: str, end: str) -> dict:
             ROUND(COALESCE(SUM(rd.tip_delta), 0.0) * 0.2, 1) AS rain_mm
         FROM readings r
         LEFT JOIN rain_deltas rd ON rd.timestamp = r.timestamp
-        WHERE date(r.timestamp, 'localtime') BETWEEN ? AND ?
+        WHERE r.timestamp >= ? AND r.timestamp < ?
         GROUP BY ({r_bucket_sql})
         ORDER BY ({r_bucket_sql})
         """,
-        (start, end, start, end),
+        (lo, hi, lo, hi),
     ).fetchall()
 
     return {"bucket_minutes": bucket_minutes, "data": [dict(r) for r in rows]}
@@ -359,6 +411,9 @@ def query_indoor_range_bucketed(start: str, end: str) -> dict:
         bucket_sql = "strftime('%Y-%m-%d', timestamp, 'localtime')"
 
     con = _get_connection()
+    # indoor_readings stores 'YYYY-MM-DD HH:MM:SS' — a bound in the readings
+    # format would compare against the wrong lexical shape (see _local_day_bounds).
+    lo, hi = _local_day_bounds(con, start, end, _TS_FMT_INDOOR)
     rows = con.execute(
         f"""
         SELECT
@@ -367,12 +422,12 @@ def query_indoor_range_bucketed(start: str, end: str) -> dict:
             ROUND(MIN(pressure), 1)     AS pressure_min,
             ROUND(MAX(pressure), 1)     AS pressure_max
         FROM indoor_readings
-        WHERE date(timestamp, 'localtime') BETWEEN ? AND ?
+        WHERE timestamp >= ? AND timestamp < ?
           AND pressure IS NOT NULL
         GROUP BY bucket
         ORDER BY bucket
         """,
-        (start, end),
+        (lo, hi),
     ).fetchall()
 
     return {"bucket_minutes": bucket_minutes, "data": [dict(r) for r in rows]}
@@ -388,6 +443,9 @@ def query_rain_totals() -> dict:
     con = _get_connection()
 
     def rain_since(start: date) -> float:
+        lo, hi = _local_day_bounds(
+            con, start.isoformat(), today.isoformat(), _TS_FMT_READINGS
+        )
         row = con.execute(
             """
             SELECT COALESCE(SUM(daily_rain), 0.0) AS rain_mm
@@ -405,14 +463,14 @@ def query_rain_totals() -> dict:
                             ORDER BY timestamp
                         ) AS tip_delta
                     FROM readings
-                    WHERE date(timestamp, 'localtime') BETWEEN ? AND ?
+                    WHERE timestamp >= ? AND timestamp < ?
                       AND rain_tip_count IS NOT NULL
                 )
                 WHERE tip_delta IS NOT NULL
                 GROUP BY day
             )
             """,
-            (start.isoformat(), today.isoformat()),
+            (lo, hi),
         ).fetchone()
         return round((row["rain_mm"] if row else 0.0) or 0.0, 1)
 
