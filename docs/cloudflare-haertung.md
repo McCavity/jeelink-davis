@@ -127,10 +127,24 @@ konfigurieren (Typ, Statuscode, Rumpf) — für einen API-Pfad wäre das ein
 sauberes `429` mit JSON-Rumpf. Diese Einstellung gibt es laut Cloudflare erst
 **ab Pro**; im Free-Plan erscheint der Abschnitt im Dialog gar nicht erst.
 
-Praktische Folge: Beim Überschreiten liefert Cloudflare seine
-Standard-Fehlerseite in HTML. Träfe das eigene Frontend darauf, bliebe es
-stumm stehen. **Deshalb die Schwelle großzügig lassen** — 30 Anfragen pro
-10 Sekunden, nicht weniger.
+Die Standardantwort ist aber besser als erwartet. **Am 26.07. gemessen**, indem
+die Regel absichtlich ausgelöst wurde:
+
+```
+HTTP/2 429
+content-type: text/plain; charset=UTF-8
+retry-after: 10
+
+error code: 1015
+```
+
+17 Bytes Klartext, kein HTML-Interstitial — und mit `Retry-After`. Für eigenen
+Code ist das auswertbar: `response.ok` ist falsch, der Status ist der
+standardkonforme `429`, und die Wartezeit steht im Header. Eine eigene
+JSON-Antwort wäre schöner, aber nichts geht dabei verloren.
+
+**Die Schwelle trotzdem großzügig lassen** — 30 Anfragen pro 10 Sekunden,
+nicht weniger. Der Grund sind die beiden Punkte unten, nicht das Antwortformat.
 
 Zwei weitere Punkte, die man kennen muß:
 
@@ -180,6 +194,31 @@ Erwartung:
 
 Bleibt `cf-cache-status` dauerhaft `DYNAMIC`, greift die Cache Rule nicht —
 dann stimmt der Ausdruck nicht oder „Eligible for cache" fehlt.
+
+### Gemessenes Ergebnis (2026-07-26)
+
+Beides von außen nachgeprüft, nachdem die Regeln gesetzt waren:
+
+**Cache Rule** — `/api/stats/yearly`, drei Abrufe hintereinander:
+
+| Abruf | `cf-cache-status` | `age` |
+|---|---|---|
+| 1 | `MISS` | — |
+| 2 | `HIT` | 0 |
+| 3 (nach 8 s) | `HIT` | 8 |
+
+Der Origin sieht den Endpunkt damit einmal statt bei jedem Besucher.
+
+**Rate Limiting** — 45 Abrufe auf `/api/latest` in 2,8 Sekunden:
+
+```
+30 × 200
+15 × 429
+```
+
+Die Regel feuert exakt an der eingestellten Schwelle. Nach 15 Sekunden war der
+Zugang wieder frei — der Rückweg gehört zur Prüfung, eine Sperre, die man nur
+auslöst und nie aufgehen sieht, ist halb geprüft.
 
 > [!warning] Nicht die teuren Endpunkte zum Testen hämmern
 > Ein `MISS` kostet den Pi 30–50 s. Für Erreichbarkeitstests `/api/latest`
