@@ -118,3 +118,4 @@ Nearly fifteen kelvin, from rewriting a `WHERE` clause.
 ## Related
 
 * Design notes: [`specs/2026-07-25-touch-console-design.md`](specs/2026-07-25-touch-console-design.md)
+* Public exposure and CDN configuration: [`cloudflare-haertung.md`](cloudflare-haertung.md) (German)

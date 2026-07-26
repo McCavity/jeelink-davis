@@ -127,10 +127,24 @@ konfigurieren (Typ, Statuscode, Rumpf) — für einen API-Pfad wäre das ein
 sauberes `429` mit JSON-Rumpf. Diese Einstellung gibt es laut Cloudflare erst
 **ab Pro**; im Free-Plan erscheint der Abschnitt im Dialog gar nicht erst.
 
-Praktische Folge: Beim Überschreiten liefert Cloudflare seine
-Standard-Fehlerseite in HTML. Träfe das eigene Frontend darauf, bliebe es
-stumm stehen. **Deshalb die Schwelle großzügig lassen** — 30 Anfragen pro
-10 Sekunden, nicht weniger.
+Die Standardantwort ist aber besser als erwartet. **Am 26.07. gemessen**, indem
+die Regel absichtlich ausgelöst wurde:
+
+```
+HTTP/2 429
+content-type: text/plain; charset=UTF-8
+retry-after: 10
+
+error code: 1015
+```
+
+17 Bytes Klartext, kein HTML-Interstitial — und mit `Retry-After`. Für eigenen
+Code ist das auswertbar: `response.ok` ist falsch, der Status ist der
+standardkonforme `429`, und die Wartezeit steht im Header. Eine eigene
+JSON-Antwort wäre schöner, aber nichts geht dabei verloren.
+
+**Die Schwelle trotzdem großzügig lassen** — 30 Anfragen pro 10 Sekunden,
+nicht weniger. Der Grund sind die beiden Punkte unten, nicht das Antwortformat.
 
 Zwei weitere Punkte, die man kennen muß:
 
@@ -143,26 +157,71 @@ Beides spricht ebenfalls für 30 statt 10.
 
 ## 3. cloudflared aktuell halten
 
-Der Tunnel läuft als Container auf `nasapp01` (Synology DS920+, DSM 7.3,
-SSH auf Port 2022). `/volume1/docker` ist leer, es gibt also keinen
-Bind-Mount — der Tunnel ist mit hoher Wahrscheinlichkeit token-basiert und
-seine Ingress-Regeln liegen im Cloudflare-Dashboard, nicht auf dem NAS.
+Der Tunnel läuft als Container auf `nasapp01` (Synology DS920+, DSM 7.3.2).
+Ist-Stand am 2026-07-26 **im Container Manager nachgesehen**:
 
-**Zuerst den Ist-Zustand sichern**, sonst ist der Tunnel-Token nach einem
-Neuanlegen verloren:
+| | |
+|---|---|
+| Container | `hennings-netzwerk-cloudflare`, angelegt 01.03.2025 |
+| Image | `cloudflare/cloudflared:` **`<none>`** — 57 MB, vom **27.02.2025** |
+| Netzwerk | `host` · Auto-Neustart aktiv |
+| Entrypoint | `cloudflared --no-autoupdate` |
+| Projekte | **keine** — es sind einfache Container, kein Compose |
+| Neues Image | `cloudflare/cloudflared:latest`, 60 MB, vom 23.07.2026, noch ungenutzt |
 
-```bash
-ssh -p 2022 nasapp01 'sudo docker inspect cloudflared > ~/cloudflared-inspect-$(date +%F).json && echo gesichert'
+Das laufende Image ist also rund **17 Monate alt**. Daß sein Tag `<none>` ist,
+ist kein Defekt: Beim Ziehen von `:latest` wandert das Tag auf das neue Image,
+und das alte behält nur seine ID.
+
+> [!caution] Der Tunnel-Token steht im Klartext auf der Detailseite
+> Unter *Container → \<name\> → Allgemein* zeigt das Feld **Ausführungsbefehl**
+> `tunnel run --token …` mit dem vollständigen Token. Von dieser Seite keine
+> Screenshots teilen, sie nicht in Tickets kleben und sie nicht an Werkzeuge
+> weitergeben, die Bilder speichern. `Aktion → Exportieren` erzeugt aus
+> demselben Grund eine Datei, die wie ein Secret zu behandeln ist.
+
+### Der Weg, der ohne Ausfall auskommt
+
+`Aktion → Zurücksetzen` und `Aktion → Einstellungen` sind **ausgegraut, solange
+der Container läuft**. Man müßte also erst stoppen — und damit wäre der Tunnel
+und alles dahinter offline, bevor man weiß, ob der neue Container überhaupt
+hochkommt. Zudem ist unklar, ob „Zurücksetzen" bei einem Container auf einem
+**tag-losen** Image das neue `latest` zieht oder dieselbe ID wiederverwendet.
+
+**`Duplizieren` löst das.** Der Knopf ist auch im laufenden Betrieb aktiv, und
+der Dialog zeigt oben ausdrücklich:
+
+```
+Image: cloudflare/cloudflared:latest
 ```
 
-Danach im Container Manager das Image `cloudflare/cloudflared:latest` laden und
-den Container darauf neu erzeugen. Bei einem Container-Manager-*Projekt*
-(Compose) macht „Projekt → Neu erstellen" Pull und Neustart in einem.
+Er löst also über das **Tag** auf, nicht über die alte ID. Vorgeschlagen werden
+`hennings-netzwerk-cloudflare-1` als Name, die übernommenen Einstellungen und
+„Diesen Container nach Abschluß des Assistenten ausführen".
 
-> [!note] Nicht selbst gesehen
-> Der DSM-Dialog ist hier ungeprüft beschrieben: `docker` verlangt auf der
-> Synology Root, und `sudo` ein Paßwort. Die Beschriftungen in DSM 7.3.2 können
-> abweichen — im Zweifel gilt der Bildschirm, nicht dieser Absatz.
+Ablauf:
+
+1. Im Duplizieren-Dialog **nach unten scrollen** und prüfen, daß Netzwerkmodus
+   `host` und der `tunnel run --token …`-Befehl übernommen wurden. (Diesen
+   Schritt macht man selbst — er zeigt den Token.)
+2. Duplizieren. Cloudflare verträgt zwei Replikate desselben Tunnels, der alte
+   Container kann also zunächst weiterlaufen.
+3. Prüfen, daß die Seiten weiter antworten und im Cloudflare-Dashboard zwei
+   gesunde Verbindungen erscheinen.
+4. Erst dann den alten Container stoppen und erneut prüfen.
+5. Läuft alles, den alten Container löschen und über *Image → Nicht verwendete
+   Images entfernen* das 57-MB-Altimage aufräumen.
+
+Der alte Container ist bis Schritt 5 der Rückweg: Neuen stoppen, alten starten.
+
+Als Sicherung vorweg, falls man den SSH-Weg bevorzugt (verlangt Root, und
+`sudo` will auf der Synology ein Paßwort):
+
+```bash
+ssh -p 2022 nasapp01 'sudo docker inspect hennings-netzwerk-cloudflare > ~/cloudflared-inspect-$(date +%F).json'
+```
+
+Die Datei enthält den Token — entsprechend behandeln.
 
 ## Verifikation
 
@@ -180,6 +239,31 @@ Erwartung:
 
 Bleibt `cf-cache-status` dauerhaft `DYNAMIC`, greift die Cache Rule nicht —
 dann stimmt der Ausdruck nicht oder „Eligible for cache" fehlt.
+
+### Gemessenes Ergebnis (2026-07-26)
+
+Beides von außen nachgeprüft, nachdem die Regeln gesetzt waren:
+
+**Cache Rule** — `/api/stats/yearly`, drei Abrufe hintereinander:
+
+| Abruf | `cf-cache-status` | `age` |
+|---|---|---|
+| 1 | `MISS` | — |
+| 2 | `HIT` | 0 |
+| 3 (nach 8 s) | `HIT` | 8 |
+
+Der Origin sieht den Endpunkt damit einmal statt bei jedem Besucher.
+
+**Rate Limiting** — 45 Abrufe auf `/api/latest` in 2,8 Sekunden:
+
+```
+30 × 200
+15 × 429
+```
+
+Die Regel feuert exakt an der eingestellten Schwelle. Nach 15 Sekunden war der
+Zugang wieder frei — der Rückweg gehört zur Prüfung, eine Sperre, die man nur
+auslöst und nie aufgehen sieht, ist halb geprüft.
 
 > [!warning] Nicht die teuren Endpunkte zum Testen hämmern
 > Ein `MISS` kostet den Pi 30–50 s. Für Erreichbarkeitstests `/api/latest`
