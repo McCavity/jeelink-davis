@@ -50,6 +50,12 @@ enables `weather-console.service`.
 `deploy.sh` is unaffected — the kiosk is optional, touch hardware is not
 assumed.
 
+[![The touch console showing the wind page](docs/images/console-03-wind-263.jpg)](docs/console.md)
+
+**[See all seven pages →](docs/console.md)** — photographed on the real panel,
+with the reasoning behind the compass rose, the three needle states, and why
+the console carries no external dependencies at all.
+
 Design notes: `docs/specs/2026-07-25-touch-console-design.md`.
 
 ## Architecture
