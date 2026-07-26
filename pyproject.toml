@@ -15,6 +15,7 @@ dependencies = [
 dev = [
     "pytest>=8",
     "pytest-mock>=3",
+    "pytest-asyncio>=0.23",
 ]
 web = [
     "fastapi>=0.111",
@@ -26,6 +27,12 @@ web = [
     "influxdb-client>=1.40",
     "paho-mqtt>=2.0",
 ]
+
+[tool.pytest.ini_options]
+# The cache tests are async; without this they are silently skipped as
+# "coroutine never awaited" rather than failing, which would make the
+# single-flight guarantee untested while still reporting green.
+asyncio_mode = "auto"
 
 [tool.setuptools.packages.find]
 where = ["."]

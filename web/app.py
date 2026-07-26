@@ -41,6 +41,53 @@ STATIC_DIR = Path(__file__).parent / "static"
 # Simple in-process cache for the Open-Meteo forecast (30-minute TTL)
 _forecast_cache: dict = {"data": None, "expires": 0.0}
 
+# ── TTL cache with single-flight, for the whole-table aggregates ────────────
+#
+# The /api/stats/* endpoints aggregate the *entire* readings table by design —
+# there is no date filter an index could serve, so the cost grows with the
+# archive and cannot be optimised away like the day/range queries were.
+# Measured 2026-07-26 on 3.5 M rows: daily 50.3 s, monthly 38.9 s, yearly 33.3 s,
+# rain totals 24.2 s. All four are reachable through the public Cloudflare
+# tunnel, which turns a single GET into a ~50 s CPU amplifier on a 2 GB Pi 4.
+#
+# A plain cache would not fix that. On a cold or just-expired entry, N
+# simultaneous requests all miss and all start the same query, so an attacker
+# simply requests in parallel. The per-key lock makes the first caller compute
+# while the others await *that* result, so concurrency can no longer multiply
+# the cost — the bound is one run per key per TTL, whatever the request rate.
+#
+# Deliberately in-process: the values are cheap to recompute after a restart and
+# an external cache would add a moving part for no gain at this size.
+_STATS_TTL = 300.0        # stats change at most once per reading; 5 min is invisible
+_RAIN_TTL  = 300.0        # rain totals move in 0.2 mm steps — 5 min loses nothing
+
+_agg_cache: dict[str, tuple[float, object]] = {}
+_agg_locks: dict[str, asyncio.Lock] = {}
+
+
+async def _cached_aggregate(key: str, ttl: float, produce):
+    """Return a cached value for *key*, computing it at most once per TTL.
+
+    *produce* is a zero-argument callable run in the default executor (these are
+    blocking sqlite3 calls and must not occupy the event loop).
+    """
+    now = time.monotonic()
+    hit = _agg_cache.get(key)
+    if hit is not None and now < hit[0]:
+        return hit[1]
+
+    lock = _agg_locks.setdefault(key, asyncio.Lock())
+    async with lock:
+        # Re-check under the lock: while we waited, the caller ahead of us has
+        # very likely filled the entry — that is the whole point of the lock.
+        hit = _agg_cache.get(key)
+        if hit is not None and time.monotonic() < hit[0]:
+            return hit[1]
+        loop = asyncio.get_running_loop()
+        value = await loop.run_in_executor(None, produce)
+        _agg_cache[key] = (time.monotonic() + ttl, value)
+        return value
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -294,29 +341,33 @@ async def indoor():
 async def rain_totals():
     """Return rain totals (mm) for the current week, month, and year."""
     from . import db as weather_db
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, weather_db.query_rain_totals)
+    return await _cached_aggregate(
+        "rain:totals", _RAIN_TTL, weather_db.query_rain_totals
+    )
 
 
 @app.get("/api/stats/daily")
 async def stats_daily():
     from . import db as weather_db
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, lambda: weather_db.query_stats("daily"))
+    return await _cached_aggregate(
+        "stats:daily", _STATS_TTL, lambda: weather_db.query_stats("daily")
+    )
 
 
 @app.get("/api/stats/monthly")
 async def stats_monthly():
     from . import db as weather_db
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, lambda: weather_db.query_stats("monthly"))
+    return await _cached_aggregate(
+        "stats:monthly", _STATS_TTL, lambda: weather_db.query_stats("monthly")
+    )
 
 
 @app.get("/api/stats/yearly")
 async def stats_yearly():
     from . import db as weather_db
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, lambda: weather_db.query_stats("yearly"))
+    return await _cached_aggregate(
+        "stats:yearly", _STATS_TTL, lambda: weather_db.query_stats("yearly")
+    )
 
 
 @app.get("/api/forecast")
