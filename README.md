@@ -274,6 +274,16 @@ The core setup (JeeLink + Davis ISS + web dashboard) works without any external 
 
 Both integrations are enabled by adding the corresponding section (`[influxdb]` or `[mqtt]`) to `config.toml`. Removing the section disables the integration entirely — no other changes required.
 
+### Exposing the dashboard publicly
+
+If you put the dashboard on the public internet, read
+[docs/cloudflare-haertung.md](docs/cloudflare-haertung.md) first (German). The
+`/api/stats/*` and `/api/rain/totals` endpoints aggregate the entire archive and
+cost tens of seconds of CPU on a Raspberry Pi — they cannot be made fast, only
+cached. The application already caches them with single-flight and emits
+`Cache-Control`; the document covers the matching CDN configuration and explains
+why blocking `/api/*` is not an option (the dashboard itself calls it).
+
 ## Community
 
 - **ioBroker forum thread** (German): [Davis Vantage Pro 2 + ioBroker in 2026](https://forum.iobroker.net/topic/84389/davis-vantage-pro-2-iobroker-in-2026) — background on the project, hardware setup, and MQTT integration. English readers: browser translation works well.
