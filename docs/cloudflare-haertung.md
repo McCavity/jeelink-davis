@@ -157,26 +157,71 @@ Beides spricht ebenfalls für 30 statt 10.
 
 ## 3. cloudflared aktuell halten
 
-Der Tunnel läuft als Container auf `nasapp01` (Synology DS920+, DSM 7.3,
-SSH auf Port 2022). `/volume1/docker` ist leer, es gibt also keinen
-Bind-Mount — der Tunnel ist mit hoher Wahrscheinlichkeit token-basiert und
-seine Ingress-Regeln liegen im Cloudflare-Dashboard, nicht auf dem NAS.
+Der Tunnel läuft als Container auf `nasapp01` (Synology DS920+, DSM 7.3.2).
+Ist-Stand am 2026-07-26 **im Container Manager nachgesehen**:
 
-**Zuerst den Ist-Zustand sichern**, sonst ist der Tunnel-Token nach einem
-Neuanlegen verloren:
+| | |
+|---|---|
+| Container | `hennings-netzwerk-cloudflare`, angelegt 01.03.2025 |
+| Image | `cloudflare/cloudflared:` **`<none>`** — 57 MB, vom **27.02.2025** |
+| Netzwerk | `host` · Auto-Neustart aktiv |
+| Entrypoint | `cloudflared --no-autoupdate` |
+| Projekte | **keine** — es sind einfache Container, kein Compose |
+| Neues Image | `cloudflare/cloudflared:latest`, 60 MB, vom 23.07.2026, noch ungenutzt |
 
-```bash
-ssh -p 2022 nasapp01 'sudo docker inspect cloudflared > ~/cloudflared-inspect-$(date +%F).json && echo gesichert'
+Das laufende Image ist also rund **17 Monate alt**. Daß sein Tag `<none>` ist,
+ist kein Defekt: Beim Ziehen von `:latest` wandert das Tag auf das neue Image,
+und das alte behält nur seine ID.
+
+> [!caution] Der Tunnel-Token steht im Klartext auf der Detailseite
+> Unter *Container → \<name\> → Allgemein* zeigt das Feld **Ausführungsbefehl**
+> `tunnel run --token …` mit dem vollständigen Token. Von dieser Seite keine
+> Screenshots teilen, sie nicht in Tickets kleben und sie nicht an Werkzeuge
+> weitergeben, die Bilder speichern. `Aktion → Exportieren` erzeugt aus
+> demselben Grund eine Datei, die wie ein Secret zu behandeln ist.
+
+### Der Weg, der ohne Ausfall auskommt
+
+`Aktion → Zurücksetzen` und `Aktion → Einstellungen` sind **ausgegraut, solange
+der Container läuft**. Man müßte also erst stoppen — und damit wäre der Tunnel
+und alles dahinter offline, bevor man weiß, ob der neue Container überhaupt
+hochkommt. Zudem ist unklar, ob „Zurücksetzen" bei einem Container auf einem
+**tag-losen** Image das neue `latest` zieht oder dieselbe ID wiederverwendet.
+
+**`Duplizieren` löst das.** Der Knopf ist auch im laufenden Betrieb aktiv, und
+der Dialog zeigt oben ausdrücklich:
+
+```
+Image: cloudflare/cloudflared:latest
 ```
 
-Danach im Container Manager das Image `cloudflare/cloudflared:latest` laden und
-den Container darauf neu erzeugen. Bei einem Container-Manager-*Projekt*
-(Compose) macht „Projekt → Neu erstellen" Pull und Neustart in einem.
+Er löst also über das **Tag** auf, nicht über die alte ID. Vorgeschlagen werden
+`hennings-netzwerk-cloudflare-1` als Name, die übernommenen Einstellungen und
+„Diesen Container nach Abschluß des Assistenten ausführen".
 
-> [!note] Nicht selbst gesehen
-> Der DSM-Dialog ist hier ungeprüft beschrieben: `docker` verlangt auf der
-> Synology Root, und `sudo` ein Paßwort. Die Beschriftungen in DSM 7.3.2 können
-> abweichen — im Zweifel gilt der Bildschirm, nicht dieser Absatz.
+Ablauf:
+
+1. Im Duplizieren-Dialog **nach unten scrollen** und prüfen, daß Netzwerkmodus
+   `host` und der `tunnel run --token …`-Befehl übernommen wurden. (Diesen
+   Schritt macht man selbst — er zeigt den Token.)
+2. Duplizieren. Cloudflare verträgt zwei Replikate desselben Tunnels, der alte
+   Container kann also zunächst weiterlaufen.
+3. Prüfen, daß die Seiten weiter antworten und im Cloudflare-Dashboard zwei
+   gesunde Verbindungen erscheinen.
+4. Erst dann den alten Container stoppen und erneut prüfen.
+5. Läuft alles, den alten Container löschen und über *Image → Nicht verwendete
+   Images entfernen* das 57-MB-Altimage aufräumen.
+
+Der alte Container ist bis Schritt 5 der Rückweg: Neuen stoppen, alten starten.
+
+Als Sicherung vorweg, falls man den SSH-Weg bevorzugt (verlangt Root, und
+`sudo` will auf der Synology ein Paßwort):
+
+```bash
+ssh -p 2022 nasapp01 'sudo docker inspect hennings-netzwerk-cloudflare > ~/cloudflared-inspect-$(date +%F).json'
+```
+
+Die Datei enthält den Token — entsprechend behandeln.
 
 ## Verifikation
 
