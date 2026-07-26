@@ -26,7 +26,8 @@ from astral.moon import phase as moon_phase
 from astral.sun import elevation as sun_elevation
 from astral.sun import sun as astral_sun
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -65,28 +66,52 @@ _agg_cache: dict[str, tuple[float, object]] = {}
 _agg_locks: dict[str, asyncio.Lock] = {}
 
 
-async def _cached_aggregate(key: str, ttl: float, produce):
-    """Return a cached value for *key*, computing it at most once per TTL.
+async def _cached_aggregate(key: str, ttl: float, produce) -> tuple[object, int]:
+    """Return ``(value, max_age)`` for *key*, computing it at most once per TTL.
 
     *produce* is a zero-argument callable run in the default executor (these are
     blocking sqlite3 calls and must not occupy the event loop).
+
+    *max_age* is the *remaining* lifetime of this cache entry in whole seconds,
+    not the full TTL. That matters as soon as a downstream cache (Cloudflare, the
+    browser) honours it: handing out a flat 300 s for a value that has already
+    sat here for four minutes would let the edge serve it for another five, so
+    the reading could reach a visitor nine minutes old. Counting down instead
+    makes both layers expire at the same instant, and the worst case stays one
+    TTL rather than two.
     """
     now = time.monotonic()
     hit = _agg_cache.get(key)
     if hit is not None and now < hit[0]:
-        return hit[1]
+        return hit[1], max(1, int(hit[0] - now))
 
     lock = _agg_locks.setdefault(key, asyncio.Lock())
     async with lock:
         # Re-check under the lock: while we waited, the caller ahead of us has
         # very likely filled the entry — that is the whole point of the lock.
         hit = _agg_cache.get(key)
-        if hit is not None and time.monotonic() < hit[0]:
-            return hit[1]
+        now = time.monotonic()
+        if hit is not None and now < hit[0]:
+            return hit[1], max(1, int(hit[0] - now))
         loop = asyncio.get_running_loop()
         value = await loop.run_in_executor(None, produce)
-        _agg_cache[key] = (time.monotonic() + ttl, value)
-        return value
+        expires = time.monotonic() + ttl
+        _agg_cache[key] = (expires, value)
+        return value, max(1, int(ttl))
+
+
+def _cacheable(data, max_age: int) -> JSONResponse:
+    """JSON response that downstream caches may keep for *max_age* seconds.
+
+    'public' is deliberate: these are aggregate weather statistics with no
+    per-visitor content, so a shared cache holding one copy for everyone is
+    exactly what we want — it is what lets a Cloudflare cache rule shield the
+    origin instead of every visitor's request reaching the Pi.
+    """
+    return JSONResponse(
+        content=jsonable_encoder(data),
+        headers={"Cache-Control": f"public, max-age={max_age}"},
+    )
 
 
 @asynccontextmanager
@@ -341,33 +366,37 @@ async def indoor():
 async def rain_totals():
     """Return rain totals (mm) for the current week, month, and year."""
     from . import db as weather_db
-    return await _cached_aggregate(
+    data, max_age = await _cached_aggregate(
         "rain:totals", _RAIN_TTL, weather_db.query_rain_totals
     )
+    return _cacheable(data, max_age)
 
 
 @app.get("/api/stats/daily")
 async def stats_daily():
     from . import db as weather_db
-    return await _cached_aggregate(
+    data, max_age = await _cached_aggregate(
         "stats:daily", _STATS_TTL, lambda: weather_db.query_stats("daily")
     )
+    return _cacheable(data, max_age)
 
 
 @app.get("/api/stats/monthly")
 async def stats_monthly():
     from . import db as weather_db
-    return await _cached_aggregate(
+    data, max_age = await _cached_aggregate(
         "stats:monthly", _STATS_TTL, lambda: weather_db.query_stats("monthly")
     )
+    return _cacheable(data, max_age)
 
 
 @app.get("/api/stats/yearly")
 async def stats_yearly():
     from . import db as weather_db
-    return await _cached_aggregate(
+    data, max_age = await _cached_aggregate(
         "stats:yearly", _STATS_TTL, lambda: weather_db.query_stats("yearly")
     )
+    return _cacheable(data, max_age)
 
 
 @app.get("/api/forecast")
