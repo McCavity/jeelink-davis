@@ -6,13 +6,15 @@ This is an optional integration that publishes live weather readings to an **MQT
 
 ## How It Works
 
-A background daemon thread (`web/mqtt_publisher.py`) picks up each incoming reading from an internal queue and publishes individual numeric topics under the prefix `davis/weather/`. Topics are published with `retain=True` and `QoS 1`, so any subscriber always receives the most recent value immediately on connect.
+A background daemon thread (`web/mqtt_publisher.py`) picks up each incoming reading from an internal queue and publishes individual numeric topics under `davis/<source>/<field>`. Topics are published with `retain=True` and `QoS 1`, so any subscriber always receives the most recent value immediately on connect.
 
-Readings arrive from two sources:
-- **Davis ISS** (outdoor) — every ~41 seconds via the JeeLink receiver
-- **GY-BME280** (indoor) — every 60 seconds (pressure appears under `davis/weather/pressure`)
+Readings arrive from two sources, and **each owns its own prefix**:
+- **Davis ISS** (outdoor) — every ~41 seconds via the JeeLink receiver → `davis/outdoor/…`
+- **GY-BME280** (indoor) — every 60 seconds → `davis/indoor/…`
 
-If the broker is unreachable at startup the thread exits silently. If the broker disconnects while running, paho-mqtt reconnects automatically.
+`davis/lightning/…` is reserved for the AS3935 lightning sensor and not published yet.
+
+If the broker is unreachable at startup, the thread retries with exponential backoff (10 s, doubling, capped at 5 min) instead of giving up. If the broker disconnects while running, paho-mqtt reconnects automatically.
 
 ---
 
@@ -32,7 +34,7 @@ Install the **MQTT adapter** from the ioBroker adapter list. The adapter can act
 - **Authentication** — set a username and password in the adapter settings.
 - **Retain** — make sure "Store retain messages" is enabled in the adapter settings so that values survive adapter restarts.
 
-Once datapoints are received they appear in ioBroker's object tree under `mqtt.0.davis.weather.*` and can be used in scripts, visualisations, and automations like any other state.
+Once datapoints are received they appear in ioBroker's object tree under `mqtt.0.davis.<source>.*` and can be used in scripts, visualisations, and automations like any other state.
 
 ---
 
@@ -61,20 +63,58 @@ If `[mqtt]` is absent from `config.toml` the publisher thread never starts.
 
 ## Topic Reference
 
-All topics are published under the prefix `davis/weather/`.
+Each source publishes under its own prefix. A field belongs to exactly one source.
 
 | Topic | Unit | Source | Notes |
 |---|---|---|---|
-| `davis/weather/temperature` | °C | Davis ISS | Outdoor air temperature |
-| `davis/weather/humidity` | % | Davis ISS | Outdoor relative humidity |
-| `davis/weather/wind_speed` | m/s | Davis ISS | 10-second average |
-| `davis/weather/wind_direction` | ° | Davis ISS | 0–359 |
-| `davis/weather/wind_gust` | m/s | Davis ISS | Highest gust in reporting period |
-| `davis/weather/rain_rate` | mm/h | Davis ISS | Computed from inter-tip interval; 0.0 if no rain |
-| `davis/weather/pressure` | hPa | BME280 (indoor) | Published on each BME280 poll (60 s) |
-| `davis/weather/rssi` | dBm | JeeLink receiver | Signal strength of last ISS packet |
-| `davis/weather/battery_ok` | 0 / 1 | Davis ISS | 1 = battery OK, 0 = low |
-| `davis/weather/feels_like` | °C | Computed | Australian BOM apparent temperature formula: T + 0.33·e − 0.70·v − 4.00 |
+| `davis/outdoor/temperature` | °C | Davis ISS | Outdoor air temperature |
+| `davis/outdoor/humidity` | % | Davis ISS | Outdoor relative humidity |
+| `davis/outdoor/wind_speed` | m/s | Davis ISS | 10-second average |
+| `davis/outdoor/wind_direction` | ° | Davis ISS | 0–359 |
+| `davis/outdoor/wind_gust` | m/s | Davis ISS | Highest gust in reporting period |
+| `davis/outdoor/rain_rate` | mm/h | Davis ISS | Computed from inter-tip interval; 0.0 if no rain |
+| `davis/outdoor/rssi` | dBm | JeeLink receiver | Signal strength of last ISS packet |
+| `davis/outdoor/battery_ok` | 0 / 1 | Davis ISS | 1 = battery OK, 0 = low |
+| `davis/outdoor/feels_like` | °C | Derived | Australian BOM apparent temperature: T + 0.33·e − 0.70·v − 4.00 |
+| `davis/indoor/temperature` | °C | BME280 | Indoor air temperature |
+| `davis/indoor/humidity` | % | BME280 | Indoor relative humidity |
+| `davis/indoor/pressure` | hPa | BME280 | Published on each poll (60 s) |
+
+### Why the source is in the topic
+
+Before 2026-08-06 all sources shared one prefix (`davis/weather/`). The Davis reader
+and the BME280 poller therefore wrote **the same** `temperature` and `humidity`
+topics and overwrote each other; consumers saw a sawtooth between outdoor and
+indoor values (measured 2026-07-29: ten samples in two minutes alternating
+between 20.8 °C and 36.7 °C). Splitting by source removes the collision by
+construction.
+
+### `feels_like` can be retracted
+
+It is derived from temperature, humidity **and** wind speed. A single ISS packet
+carries only a subset of fields, so it is computed from the most recent value of
+each — but only while all three are younger than 10 minutes. If an input stops
+arriving, the topic is **retracted** (empty retained payload) rather than left
+standing.
+
+That is not theoretical: the old `davis/weather/feels_like` showed 17.9 °C from
+2026-04-24 to 2026-08-06 because a JeeLink firmware defect suppressed the wind
+fields and the retained message simply survived. In ioBroker the state looked
+alive the whole time.
+
+### Migrating from `davis/weather/`
+
+The old retained topics keep their values at the broker until someone deletes
+them — deploying the new code is only half the change. Retract them with:
+
+```bash
+python tools/clear_retained.py --prefix 'davis/weather/#'          # read-only
+python tools/clear_retained.py --prefix 'davis/weather/#' --clear  # retract
+```
+
+The tool re-reads afterwards and reports what is left, so the result is a
+measurement and not an assertion. Stale ioBroker objects under
+`mqtt.0.davis.weather.*` have to be deleted in ioBroker itself.
 
 All values are published as plain numeric strings (e.g. `"19.5"`).
 
@@ -85,16 +125,18 @@ All values are published as plain numeric strings (e.g. `"19.5"`).
 After the first reading arrives, ioBroker creates the following states automatically (object IDs may vary slightly depending on your adapter instance number):
 
 ```
-mqtt.0.davis.weather.temperature
-mqtt.0.davis.weather.humidity
-mqtt.0.davis.weather.wind_speed
-mqtt.0.davis.weather.wind_direction
-mqtt.0.davis.weather.wind_gust
-mqtt.0.davis.weather.rain_rate
-mqtt.0.davis.weather.pressure
-mqtt.0.davis.weather.rssi
-mqtt.0.davis.weather.battery_ok
-mqtt.0.davis.weather.feels_like
+mqtt.0.davis.outdoor.temperature
+mqtt.0.davis.outdoor.humidity
+mqtt.0.davis.outdoor.wind_speed
+mqtt.0.davis.outdoor.wind_direction
+mqtt.0.davis.outdoor.wind_gust
+mqtt.0.davis.outdoor.rain_rate
+mqtt.0.davis.outdoor.rssi
+mqtt.0.davis.outdoor.battery_ok
+mqtt.0.davis.outdoor.feels_like
+mqtt.0.davis.indoor.temperature
+mqtt.0.davis.indoor.humidity
+mqtt.0.davis.indoor.pressure
 ```
 
 These states update automatically whenever a new reading is published. Use them in **Blockly scripts**, **JavaScript adapter**, **VIS dashboards**, or **ButtonPlus** button configurations like any other ioBroker state.

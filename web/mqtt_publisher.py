@@ -5,17 +5,51 @@ Optional — only active when started via publisher_thread(). Each reading is
 queued non-blocking; if the broker is unavailable readings are dropped with a
 log warning (SQLite and InfluxDB remain the primary stores).
 
-Topic layout (all retained, QoS 1):
-  davis/weather/temperature      °C
-  davis/weather/humidity         %
-  davis/weather/wind_speed       m/s
-  davis/weather/wind_direction   deg
-  davis/weather/wind_gust        m/s
-  davis/weather/rain_rate        mm/h  (computed from rain_secs; 0 if no rain)
-  davis/weather/pressure         hPa   (BME280 indoor sensor)
-  davis/weather/rssi             dBm
-  davis/weather/battery_ok       0 or 1
-  davis/weather/feels_like       °C    (apparent temperature)
+Topic layout: ``davis/<source>/<field>``, all retained, QoS 1.
+
+  davis/outdoor/temperature     °C     Davis ISS
+  davis/outdoor/humidity        %      Davis ISS
+  davis/outdoor/wind_speed      m/s    Davis ISS
+  davis/outdoor/wind_direction  deg    Davis ISS
+  davis/outdoor/wind_gust       m/s    Davis ISS
+  davis/outdoor/rain_rate       mm/h   computed from rain_secs; 0.0 if no rain
+  davis/outdoor/rssi            dBm    JeeLink receiver
+  davis/outdoor/battery_ok      0 / 1  Davis ISS
+  davis/outdoor/feels_like      °C     derived, see below
+
+  davis/indoor/temperature      °C     BME280
+  davis/indoor/humidity         %      BME280
+  davis/indoor/pressure         hPa    BME280
+
+  davis/lightning/…                    AS3935 — reserved, not published yet
+
+WHY THE SOURCE IS PART OF THE TOPIC
+-----------------------------------
+Until 2026-08-06 every source published under one flat prefix
+(``davis/weather/…``). Two threads — the Davis ISS reader and the BME280 poller
+— therefore wrote *the same* ``temperature`` and ``humidity`` topics and each
+overwrote the other. Consumers saw a sawtooth between outdoor and indoor:
+measured on 2026-07-29, ten samples in two minutes alternated between 20.8 °C
+and 36.7 °C. ``pressure`` came from the indoor sensor while sitting among
+outdoor fields, which the old docstring had to explain in prose.
+
+A prefix per source removes the collision by construction instead of by
+convention, and leaves room for a third source without repeating the mistake.
+
+WHY A DERIVED FIELD CAN BE RETRACTED
+------------------------------------
+``feels_like`` needs temperature, humidity *and* wind speed. A single ISS packet
+carries only a subset of fields, so it is derived from the most recent value of
+each — but only while all three are fresher than FRESHNESS_S. When an input
+stops arriving, the derived value must not outlive it: the topic is retracted
+with an empty retained payload instead of quietly keeping the last one.
+
+This is not hypothetical. ``davis/weather/feels_like`` stood at 17.9 °C from
+2026-04-24 to 2026-08-06 — 103 days. The cause is upstream: a JeeLink firmware
+defect suppresses field 4/5 (wind speed and direction), so no wind value ever
+arrived again, the field was skipped on every publish, and April's retained
+message survived. In ioBroker the state looked perfectly alive. Retracting does
+not fix the firmware — it stops the lie.
 """
 
 from __future__ import annotations
@@ -24,29 +58,70 @@ import logging
 import math
 import queue
 import threading
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_q: "queue.Queue[dict | None]" = queue.Queue(maxsize=200)
+_q: "queue.Queue[tuple[str, dict] | None]" = queue.Queue(maxsize=200)
 _running = False
 _lock = threading.Lock()
 
-# Topic prefix — change in config if needed
-_TOPIC_PREFIX = "davis/weather"
+TOPIC_ROOT = "davis"
+
+#: Sources and the fields each one owns. A field belongs to exactly one source —
+#: that is the whole point of the split.
+SOURCE_FIELDS: dict[str, tuple[str, ...]] = {
+    "outdoor": ("temperature", "humidity", "wind_speed", "wind_direction",
+                "wind_gust", "rssi", "battery_ok", "rain_rate", "feels_like"),
+    "indoor": ("temperature", "humidity", "pressure"),
+    "lightning": ("distance_km", "energy", "strike_count"),
+}
+
+#: Fields that are derived rather than measured. Only these may be retracted:
+#: a missing *raw* field just means "not in this packet" (the ISS rotates
+#: through field types), which is normal and must not delete anything.
+DERIVED_FIELDS: frozenset[str] = frozenset({"feels_like"})
+
+#: How long an input may be reused for a derived value.
+FRESHNESS_S = 600
+
+#: Last payload written per topic, so a topic is retracted once instead of on
+#: every packet that happens to lack the input.
+_last_payload: dict[str, str] = {}
+
+#: Most recent value per (source, field) with the monotonic time it arrived —
+#: the basis for derived fields. Raw fields are never taken from here.
+_recent: dict[tuple[str, str], tuple[float, float]] = {}
+
+_DERIVED_INPUTS = ("temperature", "humidity", "wind_speed")
 
 
-def push(payload: dict) -> None:
-    """Enqueue a reading for MQTT export. Non-blocking; drops if full."""
+def reset_state() -> None:
+    """Drop remembered inputs and topic history. For tests."""
+    _last_payload.clear()
+    _recent.clear()
+
+
+def push(payload: dict, source: str) -> None:
+    """Enqueue a reading for MQTT export. Non-blocking; drops if full.
+
+    ``source`` must be a key of SOURCE_FIELDS and decides the topic prefix.
+    Mirrors ``influxdb_writer.push(payload, measurement)``.
+    """
+    if source not in SOURCE_FIELDS:
+        raise ValueError(f"unknown MQTT source {source!r}")
     if not _running:
         return
     try:
-        _q.put_nowait(payload)
+        _q.put_nowait((source, payload))
     except queue.Full:
-        logger.warning("MQTT publish queue full — dropping reading")
+        logger.warning("MQTT publish queue full — dropping %s reading", source)
 
 
-def publisher_thread(host: str, port: int, username: str, password: str) -> None:
+def publisher_thread(host: str, port: int, username: str, password: str,
+                     retry_s: float = 10.0, max_retry_s: float = 300.0,
+                     max_attempts: int | None = None) -> None:
     """Blocking — run in a daemon thread."""
     global _running
     try:
@@ -87,11 +162,35 @@ def publisher_thread(host: str, port: int, username: str, password: str) -> None
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
 
-    try:
-        client.connect(host, port, keepalive=60)
-    except Exception:
-        logger.exception("MQTT initial connect failed")
-        return
+    # The initial connect is retried instead of being fatal.
+    #
+    # paho's reconnect_delay_set only governs re-connects *after* one successful
+    # connect. Before 2026-08-06 a failed first attempt hit `return` and killed
+    # this thread for the lifetime of the process — silently, because the
+    # dashboard kept working and only MQTT went quiet. That is the normal case
+    # at boot, where the unit starts before the network is usable, and it is
+    # what happened here: the last reading reached ioBroker on 2026-08-01 at
+    # 15:19, and nothing followed for five days.
+    delay = retry_s
+    attempt = 0
+    while True:
+        try:
+            client.connect(host, port, keepalive=60)
+            break
+        except Exception as exc:
+            attempt += 1
+            if max_attempts is not None and attempt >= max_attempts:
+                logger.error(
+                    "MQTT initial connect to %s:%d failed %d times — giving up",
+                    host, port, attempt,
+                )
+                return
+            logger.warning(
+                "MQTT initial connect to %s:%d failed (%s) — retry %d in %.0f s",
+                host, port, exc, attempt, delay,
+            )
+            time.sleep(delay)
+            delay = min(delay * 2, max_retry_s)
 
     client.loop_start()
 
@@ -99,12 +198,13 @@ def publisher_thread(host: str, port: int, username: str, password: str) -> None
         item = _q.get()
         if item is None:
             break
+        source, payload = item
         if not _connected.is_set():
             _connected.wait(timeout=10)
         try:
-            _publish_reading(client, item)
+            _publish_reading(client, source, payload)
         except Exception:
-            logger.exception("MQTT publish failed")
+            logger.exception("MQTT publish failed (%s)", source)
 
     client.loop_stop()
     client.disconnect()
@@ -112,35 +212,74 @@ def publisher_thread(host: str, port: int, username: str, password: str) -> None
         _running = False
 
 
-def _publish_reading(client: Any, payload: dict) -> None:
-    """Publish all available fields from a reading payload."""
-    fields: dict[str, Any] = {}
-
-    for field in ("temperature", "humidity", "wind_speed", "wind_direction",
-                  "wind_gust", "pressure", "rssi"):
+def _remember(source: str, payload: dict, now: float) -> None:
+    """Record raw inputs that derived fields are built from."""
+    for field in _DERIVED_INPUTS:
         v = payload.get(field)
         if v is not None:
-            fields[field] = round(float(v), 2)
+            _recent[(source, field)] = (float(v), now)
 
-    battery = payload.get("battery_ok")
-    if battery is not None:
-        fields["battery_ok"] = 1 if battery else 0
 
-    rain_rate = _compute_rain_rate(payload.get("rain_secs"))
-    if rain_rate is not None:
-        fields["rain_rate"] = rain_rate
+def _fresh(source: str, field: str, now: float) -> float | None:
+    entry = _recent.get((source, field))
+    if entry is None:
+        return None
+    value, seen = entry
+    return value if (now - seen) <= FRESHNESS_S else None
 
-    feels = _apparent_temperature(
-        payload.get("temperature"),
-        payload.get("humidity"),
-        payload.get("wind_speed"),
-    )
-    if feels is not None:
-        fields["feels_like"] = round(feels, 1)
 
-    for field, value in fields.items():
-        topic = f"{_TOPIC_PREFIX}/{field}"
-        client.publish(topic, payload=str(value), qos=1, retain=True)
+def _publish_reading(client: Any, source: str, payload: dict,
+                     now: float | None = None) -> None:
+    """Publish the fields this source owns, retract what it can no longer say."""
+    now = time.monotonic() if now is None else now
+    owned = SOURCE_FIELDS[source]
+    _remember(source, payload, now)
+
+    values: dict[str, Any] = {}
+
+    for field in ("temperature", "humidity", "wind_speed", "wind_direction",
+                  "wind_gust", "pressure", "rssi", "distance_km", "energy",
+                  "strike_count"):
+        if field not in owned:
+            continue
+        v = payload.get(field)
+        if v is not None:
+            values[field] = round(float(v), 2)
+
+    if "battery_ok" in owned and payload.get("battery_ok") is not None:
+        values["battery_ok"] = 1 if payload["battery_ok"] else 0
+
+    if "rain_rate" in owned:
+        rain_rate = _compute_rain_rate(payload.get("rain_secs"))
+        if rain_rate is not None:
+            values["rain_rate"] = rain_rate
+
+    # Derived from the freshest inputs, not from this packet alone — a single
+    # ISS packet almost never carries all three.
+    if "feels_like" in owned:
+        feels = _apparent_temperature(
+            _fresh(source, "temperature", now),
+            _fresh(source, "humidity", now),
+            _fresh(source, "wind_speed", now),
+        )
+        if feels is not None:
+            values["feels_like"] = round(feels, 1)
+
+    for field in owned:
+        topic = f"{TOPIC_ROOT}/{source}/{field}"
+        if field in values:
+            body = str(values[field])
+            client.publish(topic, payload=body, qos=1, retain=True)
+            _last_payload[topic] = body
+        elif field in DERIVED_FIELDS and _last_payload.get(topic):
+            # Inputs went stale. Retract the retained value rather than let it
+            # stand; an empty retained payload deletes it at the broker.
+            client.publish(topic, payload="", qos=1, retain=True)
+            _last_payload[topic] = ""
+            logger.warning(
+                "MQTT %s: inputs older than %d s — retained value retracted",
+                topic, FRESHNESS_S,
+            )
 
 
 def _compute_rain_rate(rain_secs: float | None) -> float | None:
