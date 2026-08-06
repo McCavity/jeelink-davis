@@ -241,7 +241,18 @@ def _read_event(sensor) -> dict:
         energy = round(float(sensor.get_strike_energy_raw()), 3)
 
     return {
-        "timestamp":   datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        # Microseconds, unlike the other two sources — and not for precision.
+        # InfluxDB deduplicates on (measurement, tags, timestamp), so at second
+        # resolution a burst collapses into one point per second. Measured on
+        # 2026-08-06 during the acceptance test: 137 `unknown` events fell into
+        # 13 distinct seconds, and InfluxDB held exactly 13 points. The Davis
+        # and BME280 readers arrive every 41 and 60 seconds and can never
+        # collide; lightning arrives in bursts, which is the whole point.
+        #
+        # Longer strings stay correct in the day-range queries: those compare
+        # lexically against a bound truncated to whole seconds, and a longer
+        # string sharing that prefix still sorts on the right side of it.
+        "timestamp":   datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f"),
         "kind":        kind,
         "distance_km": distance,
         "energy":      energy,

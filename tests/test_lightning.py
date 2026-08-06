@@ -205,6 +205,28 @@ class TestReadEvent:
         assert event["distance_km"] == 12.0
         assert event["energy"] == 0.523
 
+    def test_timestamp_has_sub_second_resolution(self):
+        """Not precision — InfluxDB deduplicates on (measurement, tags,
+        timestamp), so at second resolution a burst collapses into one point
+        per second. Measured on 2026-08-06 during the acceptance test: 137
+        events fell into 13 distinct seconds, and InfluxDB held exactly 13
+        points. The count was wrong and nothing said so.
+        """
+        s = FakeSensor()
+        s.interrupt_src = 2
+        ts = lightning_reader._read_event(s)["timestamp"]
+
+        datum, _, bruchteil = ts.partition(".")
+        assert len(datum) == len("2026-08-06 19:01:23")
+        assert len(bruchteil) == 6 and bruchteil.isdigit()
+
+    def test_two_events_in_one_second_stay_distinct(self):
+        """The property that actually matters downstream."""
+        s = FakeSensor()
+        s.interrupt_src = 2
+        stempel = {lightning_reader._read_event(s)["timestamp"] for _ in range(5)}
+        assert len(stempel) == 5
+
     @pytest.mark.parametrize("src,kind", [(2, "disturber"), (3, "noise"), (0, "unknown")])
     def test_non_strike_events_carry_no_numbers(self, src, kind):
         """Distance and energy registers hold the *last strike*, so copying them
@@ -501,6 +523,33 @@ class TestQueries:
     def test_yesterdays_events_do_not_count_towards_today(self, db):
         self._add(db, "lightning", 5.0, 0.1, ts="2020-01-01 12:00:00")
         assert db.query_lightning_today()["lightning"] == 0
+
+    def test_microsecond_stamps_land_on_the_right_side_of_midnight(self, db):
+        """The day bounds are truncated to whole seconds and compared as
+        strings. A longer stamp sharing that prefix must still sort correctly —
+        otherwise the first event of each local day would be miscounted, and
+        nothing would say so.
+
+        The boundary is derived with zoneinfo rather than written down as
+        22:00 UTC: that figure is only right in summer, and a test that is
+        wrong for half the year is worse than none.
+        """
+        import zoneinfo
+        from datetime import date, datetime, time, timedelta, timezone
+
+        tz = zoneinfo.ZoneInfo("Europe/Berlin")
+        mitternacht_utc = (
+            datetime.combine(date.today(), time(0, 0), tzinfo=tz)
+            .astimezone(timezone.utc)
+        )
+        fmt = "%Y-%m-%d %H:%M:%S.%f"
+
+        self._add(db, "lightning", 5.0, 0.1,
+                  ts=(mitternacht_utc - timedelta(microseconds=1)).strftime(fmt))
+        self._add(db, "lightning", 6.0, 0.2,
+                  ts=(mitternacht_utc + timedelta(microseconds=1)).strftime(fmt))
+
+        assert db.query_lightning_today()["lightning"] == 1
 
     def test_last_event_and_last_strike_are_different_questions(self, db):
         """The liveness answer: a disturber arrived after the last strike, so

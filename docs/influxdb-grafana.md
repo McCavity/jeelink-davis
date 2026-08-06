@@ -68,6 +68,14 @@ disturber rate and the strike rate are different questions. Every event is
 written, not only the strikes; `strike_count` is present on all of them so that
 a disturber point is not fieldless, which InfluxDB rejects.
 
+**Lightning timestamps carry microseconds, and they have to.** InfluxDB
+deduplicates on `(measurement, tags, timestamp)`, so two events of the same kind
+in the same second would overwrite each other. Measured during the acceptance
+test on 2026-08-06: 137 events fell into 13 distinct seconds and the bucket held
+exactly 13 points — an undercount with nothing anywhere to indicate it. The
+outdoor and indoor readers arrive every 41 and 60 seconds and cannot collide;
+lightning arrives in bursts, which is precisely the case that matters.
+
 ---
 
 ## Hourly Downsampling Task
