@@ -56,6 +56,23 @@
     .mm    { display:flex; gap:22px; font-size:26px; font-variant-numeric:tabular-nums; }
     .bar   { height:16px; background:#1e293b; border-radius:8px; overflow:hidden; margin-top:14px; }
     .bar > i { display:block; height:100%; border-radius:8px; }
+
+    /* Scale with a position marker, not a fill. A filled bar reads as "how
+       much of something" — here the value is a position on a range (1-40 km),
+       and 40 km is not "more" of anything. overflow stays visible so the
+       marker can sit on the track rather than inside it. */
+    .scale  { position:relative; height:16px; background:#1e293b; border-radius:8px; margin-top:20px; }
+    .scale > i { position:absolute; top:-5px; width:6px; height:26px; border-radius:3px;
+                 background:#fbbf24; transform:translateX(-3px); }
+    .scale-ends { display:flex; justify-content:space-between; margin-top:9px; }
+
+    /* Reference table for a foreign scale — deliberately quiet: no accent
+       colour, nothing that could read as a reading of ours. */
+    .ref   { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+    .ref td { padding:7px 0; font-size:25px; color:#94a3b8; border-top:1px solid #1e293b; }
+    .ref tr:first-child td { border-top:none; }
+    .ref td:first-child { color:#64748b; white-space:nowrap; padding-right:22px; }
+    .note  { font-size:19px; color:#475569; margin-top:12px; line-height:1.35; }
     .chip  { display:inline-flex; align-items:center; gap:8px; font-size:20px; padding:7px 15px;
              border-radius:9px; background:#0f1a2b; border:1px solid #1e293b; color:#94a3b8; }
     .chip b { font-weight:600; color:#e2e8f0; }

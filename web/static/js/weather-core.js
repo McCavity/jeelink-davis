@@ -166,6 +166,29 @@ const WeatherCore = (function () {
     return Number.isNaN(ms) ? null : ms;
   }
 
+  // Position of a strike distance on the AS3935's own 1…40 km range, as a
+  // percentage — a marker on a scale, not a fill: 40 km is not "more" of
+  // anything than 1 km, it is further away.
+  //
+  // The bounds are the chip's, datasheet DS000385 Table 17 (1 km = overhead,
+  // then 5…40 km). Deliberately the same numbers the plausibility gate uses,
+  // because a bar drawn on a wider range than the gate admits would leave dead
+  // zones no reading can ever reach.
+  //
+  // Returns null for a missing or unusable value rather than 0 — a marker
+  // parked at the left end would read as "directly overhead", which is the
+  // most alarming thing this scale can say.
+  const DISTANCE_MIN_KM = 1;
+  const DISTANCE_MAX_KM = 40;
+
+  function distanceScalePercent(km) {
+    if (km == null) return null;
+    const v = Number(km);
+    if (!Number.isFinite(v)) return null;
+    const pct = ((v - DISTANCE_MIN_KM) / (DISTANCE_MAX_KM - DISTANCE_MIN_KM)) * 100;
+    return Math.max(0, Math.min(100, pct));
+  }
+
   function rssiPct(dbm) {
     return dbm == null ? 0 : Math.max(0, Math.min(100, ((dbm + 90) / 50) * 100));
   }
@@ -243,6 +266,7 @@ const WeatherCore = (function () {
     calcDewPoint, calcFeelsLike, fmt, timeOf, humanElapsed,
     degToCompass, formatBearing, moonEmoji, moonPhaseKey,
     rssiPct, lerpHex, tempColorHex, mergeReading, rainRate, isNewTip,
+    distanceScalePercent, DISTANCE_MIN_KM, DISTANCE_MAX_KM,
     dataAgeState, meanOver, windPointerState, parseTimestampMs,
     localDayStartMs, dayArcPercent,
   };

@@ -204,6 +204,13 @@
     "kind_lightning":    "lightning",
     "kind_disturber":    "disturber",
     "kind_noise":        "noise",
-    "kind_unknown":      "unknown"
+    "kind_unknown":      "unknown",
+    "ka_title": "Lightning strength (Kachelmann scale)",
+    "ka_brummler": "faint rumbler",
+    "ka_roller": "rolling grumble",
+    "ka_knaller": "sharp cracker",
+    "ka_droehner": "steady boomer",
+    "ka_hausruettler": "wild house-shaker",
+    "ka_note": "Peak current in kA, determined by lightning-location networks from the arrival-time geometry of several stations. This sensor cannot measure it: its “energy” is, per the datasheet, a pure number with no physical meaning. The German names are Kachelmann’s; the English ones are ours."
   }
 }

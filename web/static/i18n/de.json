@@ -204,6 +204,13 @@
     "kind_lightning":    "Blitz",
     "kind_disturber":    "Störer",
     "kind_noise":        "Rauschen",
-    "kind_unknown":      "unbekannt"
+    "kind_unknown":      "unbekannt",
+    "ka_title": "Blitzstärke (Skala nach Kachelmann)",
+    "ka_brummler": "schwacher Brummler",
+    "ka_roller": "mittlerer Roller",
+    "ka_knaller": "starker Knaller",
+    "ka_droehner": "stabiler Dröhner",
+    "ka_hausruettler": "wilder Hausrüttler",
+    "ka_note": "Spitzenstrom in kA, von Blitzortungsnetzen aus der Laufzeitgeometrie mehrerer Stationen bestimmt. Dieser Sensor kann ihn nicht messen: seine „Energie“ ist laut Datenblatt eine reine Zahl ohne physikalische Bedeutung."
   }
 }

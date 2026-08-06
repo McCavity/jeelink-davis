@@ -141,6 +141,31 @@ test('parseTimestampMs parses an ISO 8601 string with an offset', () => {
     Date.parse('2026-07-25T13:24:00.660+00:00'));
 });
 
+test('distanceScalePercent puts both documented ends on the ends', () => {
+  // The AS3935's own range, datasheet Table 17: 1 km means overhead, 40 km is
+  // the furthest it will estimate. A marker that did not reach either end
+  // would misreport the two readings that matter most.
+  assert.equal(WC.distanceScalePercent(1), 0);
+  assert.equal(WC.distanceScalePercent(40), 100);
+  assert.equal(Math.round(WC.distanceScalePercent(20.5) * 10) / 10, 50);
+});
+
+test('distanceScalePercent returns null for no reading, never 0', () => {
+  // 0 % is "directly overhead" — the most alarming thing this scale can say,
+  // and the last thing a missing value should render as.
+  assert.equal(WC.distanceScalePercent(null), null);
+  assert.equal(WC.distanceScalePercent(undefined), null);
+  assert.equal(WC.distanceScalePercent('keine Zahl'), null);
+});
+
+test('distanceScalePercent clamps the out-of-range code instead of overflowing', () => {
+  // 63 km is the chip's "out of range" code. The plausibility gate rejects it
+  // before it can reach here, but a marker at 159 % would sit outside the
+  // track if it ever did.
+  assert.equal(WC.distanceScalePercent(63), 100);
+  assert.equal(WC.distanceScalePercent(0), 0);
+});
+
 test('parseTimestampMs reads an unmarked stamp as UTC, not local time', () => {
   // What /api/lightning and the SQLite indoor/lightning tables store: UTC, but
   // with nothing in the string that says so. Read as local time it would be off

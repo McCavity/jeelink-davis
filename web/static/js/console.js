@@ -5,6 +5,7 @@ const {
   moonEmoji, moonPhaseKey, MOON_PHASE_EN, TREND_ARROWS,
   rssiPct, dataAgeState, meanOver, windPointerState, calcDewPoint,
   mergeReading, rainRate, isNewTip, parseTimestampMs,
+  distanceScalePercent,
   localDayStartMs, dayArcPercent,
 } = WeatherCore;
 
@@ -36,6 +37,28 @@ const state = {
   lastTipAt: null,       // wall-clock ms of the last rain_tip_count increase;
                           // in-memory only — unknown again after a restart.
 };
+
+// ── Kachelmann lightning-strength scale ────────────────────────────────────
+// A FOREIGN scale, shown for reference only. It grades the peak current of a
+// strike in kiloampere, as measured by lightning-location networks from the
+// arrival-time geometry of several stations.
+//
+// This sensor cannot produce a value for it, and no arithmetic here can: the
+// AS3935's "energy" is, in the datasheet's own words, "just a pure number and
+// has no physical meaning", and the chip's distance estimate is derived from
+// that same measurement — one equation, two unknowns. Placing our strikes on
+// this scale would be an invented reading wearing a real name.
+//
+// German names are Jörg Kachelmann's. The English ones are OURS: the service is
+// German-language and no official translation exists. Renaming a label is
+// cosmetic; inventing the mapping above would not be.
+const KACHELMANN_KA = [
+  { id: 'brummler',   range: '0–3 kA',    en: 'faint rumbler' },
+  { id: 'roller',     range: '3–7 kA',    en: 'rolling grumble' },
+  { id: 'knaller',    range: '7–40 kA',   en: 'sharp cracker' },
+  { id: 'droehner',   range: '40–100 kA', en: 'steady boomer' },
+  { id: 'hausruettler', range: '≥ 100 kA', en: 'wild house-shaker' },
+];
 
 // ── Pages ──────────────────────────────────────────────────────────────────
 // Each entry: id, title key, ageSource (which clock the header shows),
@@ -252,6 +275,9 @@ const PAGES = [
       const strike = l.last_strike, ereignis = l.last_event, heute = l.today || {};
       const seenMs = parseTimestampMs(ereignis && ereignis.timestamp);
       const seen = seenMs == null ? '—' : humanElapsed(Date.now() - seenMs, tr);
+      const pos = distanceScalePercent(strike && strike.distance_km);
+      const zeilen = KACHELMANN_KA.map(k =>
+        `<tr><td>${k.range}</td><td>${tr('console.ka_' + k.id, k.en)}</td></tr>`).join('');
       root.innerHTML = `
         <div class="col" style="flex:1">
           <div class="tile" style="flex:1">
@@ -262,19 +288,32 @@ const PAGES = [
               ? `${timeOf(new Date(parseTimestampMs(strike.timestamp)).toISOString(), LOCALE)}
                  · ${tr('console.energy', 'energy')} ${fmt(strike.energy, 2)}`
               : tr('console.no_strike_yet', 'none recorded yet')}</div>
+            <div class="scale">${pos == null ? '' : `<i style="left:${pos}%"></i>`}</div>
+            <div class="scale-ends"><span class="sub-d">1 km</span><span class="sub-d">40 km</span></div>
+          </div>
+          <div class="grid2" style="flex:0 0 200px">
+            ${tile(tr('cards.lightning_today', 'Strikes today'),
+              `<span class="big amber">${heute.lightning ?? 0}</span>`,
+              `${tr('console.disturbers', 'disturbers')} ${heute.disturber ?? 0} · ${
+                tr('console.other', 'other')} ${(heute.noise ?? 0) + (heute.unknown ?? 0)}`)}
+            ${tile(tr('cards.lightning_last_event', 'Last signal'),
+              // nowrap and a step down from .med: humanElapsed yields two words
+              // ("3 Min. her", "12 Std. her") and the tile is half-width, so at
+              // 58 px it wrapped mid-phrase.
+              `<span class="med slate" style="font-size:46px;white-space:nowrap">${seen}</span>`,
+              ereignis ? `${tr('console.kind', 'kind')} ${
+                tr('console.kind_' + ereignis.kind, ereignis.kind)}` : '')}
           </div>
         </div>
         <div class="col" style="flex:1">
-          ${tile(tr('cards.lightning_today', 'Strikes today'),
-            `<span class="huge amber" style="font-size:150px">${heute.lightning ?? 0}</span>`,
-            `${tr('console.disturbers', 'disturbers')} ${heute.disturber ?? 0} · ${
-              tr('console.other', 'other')} ${(heute.noise ?? 0) + (heute.unknown ?? 0)}`,
-            { style: 'flex:1' })}
-          ${tile(tr('cards.lightning_last_event', 'Last signal'),
-            `<span class="med slate">${seen}</span>`,
-            ereignis ? `${tr('console.kind', 'kind')} ${
-              tr('console.kind_' + ereignis.kind, ereignis.kind)}` : '',
-            { style: 'flex:0 0 150px' })}
+          <div class="tile" style="flex:1">
+            <div class="lbl">${tr('console.ka_title', 'Lightning strength (Kachelmann)')}</div>
+            <table class="ref" style="margin-top:16px"><tbody>${zeilen}</tbody></table>
+            <div class="note">${tr('console.ka_note',
+              'Peak current in kA, measured by lightning-location networks. ' +
+              'This sensor cannot measure it — its "energy" is a pure number ' +
+              'with no physical meaning (AS3935 datasheet).')}</div>
+          </div>
         </div>`;
     } },
   { id: 'status', title: 'Status', age: 'outdoor', render: (root, s) => {
