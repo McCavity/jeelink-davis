@@ -27,6 +27,16 @@ web = [
     "influxdb-client>=1.40",
     "paho-mqtt>=2.0",
 ]
+# Raspberry Pi only, and deliberately not part of [web]: rpi-lgpio pulls in the
+# lgpio C library, which does not build on a development machine — putting it
+# in [web] would break `pip install -e ".[dev,web]"` everywhere but the Pi.
+#
+# rpi-lgpio is the *shim*, not RPi.GPIO. It provides the same `RPi.GPIO` module
+# name on kernels that no longer offer the sysfs GPIO interface. Installing the
+# real RPi.GPIO alongside it gives two packages claiming one import name.
+lightning = [
+    "rpi-lgpio>=0.6",
+]
 
 [tool.pytest.ini_options]
 # The cache tests are async; without this they are silently skipped as

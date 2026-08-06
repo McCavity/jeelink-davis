@@ -52,6 +52,20 @@ CREATE TABLE IF NOT EXISTS indoor_readings (
 );
 
 CREATE INDEX IF NOT EXISTS idx_indoor_ts ON indoor_readings (timestamp);
+
+-- AS3935 lightning sensor. Every interrupt is stored, not only the strikes:
+-- the disturber and noise counts are the record of how quiet the corner is,
+-- and without them a later "is it noisier now?" has nothing to compare with.
+-- distance_km and energy are NULL for everything except kind='lightning'.
+CREATE TABLE IF NOT EXISTS lightning_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp   TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    distance_km REAL,
+    energy      REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_lightning_ts ON lightning_events (timestamp);
 """
 
 
@@ -157,6 +171,70 @@ def insert_indoor_reading(payload: dict) -> None:
         payload,
     )
     con.commit()
+
+
+def insert_lightning_event(event: dict) -> None:
+    """Insert a single AS3935 event dict (as produced by lightning_reader)."""
+    con = _get_connection()
+    con.execute(
+        """
+        INSERT INTO lightning_events (timestamp, kind, distance_km, energy)
+        VALUES (:timestamp, :kind, :distance_km, :energy)
+        """,
+        {feld: event.get(feld) for feld in
+         ("timestamp", "kind", "distance_km", "energy")},
+    )
+    con.commit()
+
+
+def query_lightning_today() -> dict:
+    """Event counts for the current *local* day, one entry per kind.
+
+    All four kinds are always present, zeros included. A missing key would be
+    indistinguishable from a kind that never occurred, and the disturber count
+    is precisely what tells a quiet day apart from a deaf sensor.
+    """
+    con = _get_connection()
+    today = date.today().isoformat()
+    # lightning_events uses the space-separated UTC format, like indoor_readings.
+    lo, hi = _local_day_bounds(con, today, today, _TS_FMT_INDOOR)
+    rows = con.execute(
+        """
+        SELECT kind, COUNT(*) AS n
+        FROM   lightning_events
+        WHERE  timestamp >= ? AND timestamp < ?
+        GROUP  BY kind
+        """,
+        (lo, hi),
+    ).fetchall()
+    counts = {"lightning": 0, "disturber": 0, "noise": 0, "unknown": 0}
+    for r in rows:
+        counts[r["kind"]] = r["n"]
+    return counts
+
+
+def query_lightning_last(kind: str | None = None) -> dict | None:
+    """Most recent event, optionally restricted to one kind. None if there is
+    no such event at all.
+
+    Two callers, two questions. Without a *kind* it answers "did this sensor
+    fire recently?", which is the only thing that distinguishes a quiet sky
+    from a disconnected IRQ wire — an empty log looks identical either way.
+    With ``kind='lightning'`` it answers "when was the last strike?".
+    """
+    con = _get_connection()
+    if kind is None:
+        row = con.execute(
+            "SELECT timestamp, kind, distance_km, energy FROM lightning_events "
+            "ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    else:
+        row = con.execute(
+            "SELECT timestamp, kind, distance_km, energy FROM lightning_events "
+            "WHERE kind = ? ORDER BY id DESC LIMIT 1",
+            (kind,),
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def query_pressure_trend() -> str:

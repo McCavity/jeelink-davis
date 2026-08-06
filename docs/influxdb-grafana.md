@@ -49,12 +49,24 @@ If `[influxdb]` is absent from `config.toml` the writer thread never starts and 
 
 ### 4. Measurement layout
 
-Two measurements are written to the `weather` bucket:
+Three measurements are written to the `weather` bucket:
 
-| Measurement | Source | Key fields |
-|---|---|---|
-| `davis_weather` | Davis ISS (outdoor) | temperature, humidity, wind_speed, wind_direction, wind_gust, rain_rate, rssi, battery_ok, feels_like |
-| `indoor_climate` | GY-BME280 (indoor) | temperature, humidity, pressure |
+| Measurement | Source | Tags | Key fields |
+|---|---|---|---|
+| `outdoor` | Davis ISS (outdoor) | `station_id` | temperature, humidity, wind_speed, wind_direction, wind_gust, rain_tip_count, rain_secs, solar_radiation, uv_index, rssi, battery_ok |
+| `indoor` | GY-BME280 (indoor) | — | temperature, humidity, pressure |
+| `lightning` | AS3935 | `kind` | distance_km, energy, strike_count |
+
+> The first two rows read `davis_weather` and `indoor_climate` until 2026-08-06.
+> That was never what the code wrote — `influxdb_writer` has always used
+> `Point("outdoor")` and `Point("indoor")`, and the shipped Grafana dashboard
+> filters on those. The names above are the ones in the bucket.
+
+`kind` is a tag, not a field: it has four values for all time (`lightning`,
+`disturber`, `noise`, `unknown`) and separating the series is the point — the
+disturber rate and the strike rate are different questions. Every event is
+written, not only the strikes; `strike_count` is present on all of them so that
+a disturber point is not fieldless, which InfluxDB rejects.
 
 ---
 

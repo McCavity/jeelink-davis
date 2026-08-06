@@ -60,11 +60,24 @@ OUTDOOR_RANGES: dict[str, tuple[float, float]] = {
 # the reading one keeps a weather station for. The lower bound is 0, not 2 mph:
 # below its measuring threshold the anemometer legitimately reports calm.
 
+# AMS AS3935 franklin lightning sensor, datasheet DS000385.
+# Register 0x07 (DISTANCE), Table 17: the reported estimate is 1 km ("storm
+# overhead") and then 5…40 km; 0b111111 (63) is the sensor's own "out of range"
+# code. 40 is therefore the largest number the chip can mean, and anything above
+# it is the out-of-range code or a garbled read, not a distant storm.
+LIGHTNING_RANGES: dict[str, tuple[float, float]] = {
+    "distance_km": (1.0, 40.0),      # Table 17, distance estimation
+}
+
 # Deliberately unchecked, because no manufacturer range exists for them:
 #   rssi, voltage_solar, voltage_capacitor  — JeeLink/RFM69 internals
 #   rain_secs                               — inter-tip interval, negative is
 #                                             the firmware's "no rain" sentinel
 #   wind_gust_ref, channel, station_id, battery_ok
+#   energy                                  — AS3935 "energy" is explicitly a
+#                                             pure number with no physical unit
+#                                             and no documented scale; a bound
+#                                             here would be invented outright
 # Inventing bounds for these would dress a guess up as a specification.
 
 
@@ -144,6 +157,31 @@ def reject_indoor(reading: dict) -> dict[str, float]:
     }
     for feld, wert in verworfen.items():
         _record("indoor", feld, wert)
+    return verworfen
+
+
+def filter_lightning(event: dict) -> dict[str, float]:
+    """Null out every implausible field of an AS3935 event, in place.
+
+    Field-wise, and never discarding the record — the third variant among the
+    three sources, for a reason particular to this sensor. A BME280 sample is
+    discarded whole because its three values share one measurement; a Davis
+    packet is filtered field-wise because a garbled serial line corrupts a
+    digit. Here the event itself *is* the measurement: that the sensor fired is
+    a fact independent of the distance register, and 63 in that register is the
+    chip's documented way of saying "further than I can estimate". Dropping the
+    event over it would delete a detection in order to reject a number.
+
+    Returns ``{field: value}`` of what was rejected — empty when nothing was.
+    """
+    verworfen = {
+        feld: event[feld]
+        for feld in LIGHTNING_RANGES
+        if _out_of_range(LIGHTNING_RANGES, feld, event.get(feld))
+    }
+    for feld, wert in verworfen.items():
+        event[feld] = None
+        _record("lightning", feld, wert)
     return verworfen
 
 

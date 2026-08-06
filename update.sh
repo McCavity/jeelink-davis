@@ -83,7 +83,26 @@ rsync -a --delete \
 if $REINSTALL; then
     echo "Reinstalling Python dependencies …"
     "$INSTALL_DIR/.venv/bin/pip" install --quiet --upgrade pip
-    "$INSTALL_DIR/.venv/bin/pip" install --quiet -e "$INSTALL_DIR/[web]"
+    EXTRAS=web
+    # The AS3935 needs rpi-lgpio, which is Pi-only and therefore not in [web].
+    # Keyed off the installed config, not off a flag: an installation that has
+    # the sensor configured is exactly the one that needs the dependency, and
+    # nothing here can then fall out of step with what the service will start.
+    if grep -qE '^\s*\[lightning\]' "$INSTALL_DIR/config.toml" 2>/dev/null; then
+        EXTRAS="web,lightning"
+        echo "  [lightning] found in config.toml — installing GPIO support too"
+    fi
+    "$INSTALL_DIR/.venv/bin/pip" install --quiet -e "$INSTALL_DIR/[$EXTRAS]"
+fi
+
+# Group membership, not a dependency — but the same failure looks identical.
+# Installations deployed before the AS3935 existed have a service user without
+# the 'gpio' group, and /dev/gpiochip* is root:gpio mode 660: the lightning
+# thread would die at GPIO.setup() while everything else came up fine. The
+# service is restarted below, which is when systemd re-reads the group list.
+if ! id -nG "$SERVICE_USER" | tr ' ' '\n' | grep -qx gpio; then
+    echo "Adding '$SERVICE_USER' to the 'gpio' group (AS3935 interrupt line) …"
+    usermod -aG gpio "$SERVICE_USER"
 fi
 
 # ---------------------------------------------------------------------------

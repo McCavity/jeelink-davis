@@ -8,11 +8,10 @@ This is an optional integration that publishes live weather readings to an **MQT
 
 A background daemon thread (`web/mqtt_publisher.py`) picks up each incoming reading from an internal queue and publishes individual numeric topics under `davis/<source>/<field>`. Topics are published with `retain=True` and `QoS 1`, so any subscriber always receives the most recent value immediately on connect.
 
-Readings arrive from two sources, and **each owns its own prefix**:
+Readings arrive from three sources, and **each owns its own prefix**:
 - **Davis ISS** (outdoor) — every ~41 seconds via the JeeLink receiver → `davis/outdoor/…`
 - **GY-BME280** (indoor) — every 60 seconds → `davis/indoor/…`
-
-`davis/lightning/…` is reserved for the AS3935 lightning sensor and not published yet.
+- **AS3935** (lightning) — on each detected strike → `davis/lightning/…`
 
 If the broker is unreachable at startup, the thread retries with exponential backoff (10 s, doubling, capped at 5 min) instead of giving up. If the broker disconnects while running, paho-mqtt reconnects automatically.
 
@@ -79,6 +78,25 @@ Each source publishes under its own prefix. A field belongs to exactly one sourc
 | `davis/indoor/temperature` | °C | BME280 | Indoor air temperature |
 | `davis/indoor/humidity` | % | BME280 | Indoor relative humidity |
 | `davis/indoor/pressure` | hPa | BME280 | Published on each poll (60 s) |
+| `davis/lightning/distance_km` | km | AS3935 | Distance of the last strike, 1–40; retracted when the sensor reported out of range |
+| `davis/lightning/energy` | — | AS3935 | Unitless; the datasheet gives no scale, so do not read it as joules |
+| `davis/lightning/strike_count` | count | AS3935 | Strikes so far today, local day, counted from the database |
+
+### Why only strikes appear under `davis/lightning/`
+
+The AS3935 also fires on disturbers and on noise, and both are stored — they are
+the record of how quiet the corner is. They are **not** published. A disturber
+carries no distance and no energy, so publishing one would leave the *previous*
+strike's retained values standing under a fresh event, and a consumer would see
+a distance belonging to a different hour. For the same reason `distance_km` is
+retracted (empty retained payload) when a strike's distance failed the
+plausibility gate, rather than being left at the last value that passed.
+
+> **These topics carry no warning, by design.** As of 2026-08-06 the sensor has
+> only ever reacted to interference and to a spark a few centimetres away; it
+> has never been compared against a real thunderstorm. Build a notification on
+> `distance_km` and you are building it on an unvalidated number — the false
+> "lightning at 8 km" events came with a distance too.
 
 ### Why the source is in the topic
 
