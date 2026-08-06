@@ -37,6 +37,7 @@
     "pressure_trend_unknown": "Noch keine Trenddaten",
     "indoor_temp":      "Innen Temp.",
     "indoor_humidity":  "Innen Feuchte",
+    "indoor":               "Innenklima",
     "lightning":            "Blitz",
     "lightning_today":      "Blitze heute",
     "lightning_last_event": "Letztes Signal",
@@ -192,6 +193,24 @@
     "since_boot":   "SEIT START",
     "core":         "KERN",
     "calm":         "windstill",
-    "no_data_since":"keine Daten seit"
+    "no_data_since":"keine Daten seit",
+    "lightning":         "Blitz",
+    "last_strike":       "Letzter Blitz",
+    "energy":            "Energie",
+    "no_strike_yet":     "noch keiner aufgezeichnet",
+    "disturbers":        "Störer",
+    "other":             "sonstige",
+    "kind":              "Art",
+    "kind_lightning":    "Blitz",
+    "kind_disturber":    "Störer",
+    "kind_noise":        "Rauschen",
+    "kind_unknown":      "unbekannt",
+    "ka_title": "Blitzstärke (Skala nach Kachelmann)",
+    "ka_brummler": "schwacher Brummler",
+    "ka_roller": "mittlerer Roller",
+    "ka_knaller": "starker Knaller",
+    "ka_droehner": "stabiler Dröhner",
+    "ka_hausruettler": "wilder Hausrüttler",
+    "ka_note": "Spitzenstrom in kA, von Blitzortungsnetzen aus der Laufzeitgeometrie mehrerer Stationen bestimmt. Dieser Sensor kann ihn nicht messen: seine „Energie“ ist laut Datenblatt eine reine Zahl ohne physikalische Bedeutung."
   }
 }

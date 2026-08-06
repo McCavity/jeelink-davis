@@ -149,10 +149,44 @@ const WeatherCore = (function () {
   // Returns null (not NaN, not "now") when the field is missing or the
   // string doesn't parse, so a bad/absent timestamp reads as unknown age
   // rather than as fresh.
+  //
+  // Two formats reach this function, and only one of them says so:
+  //   /api/latest     '2026-04-23T14:30:00+00:00'   — carries its offset
+  //   /api/lightning  '2026-08-06 19:01:43.481902'  — UTC, but unmarked
+  // The second is what SQLite stores for the indoor and lightning tables. Left
+  // to `new Date()`, a string with no zone is read as *local* time, so every
+  // event would look two hours old in a German summer — plausible enough to go
+  // unnoticed, which is exactly what makes it worth handling in one place
+  // rather than at each call site.
   function parseTimestampMs(iso) {
     if (!iso) return null;
-    const ms = new Date(iso).getTime();
+    const s = String(iso);
+    const hatZone = /[Zz]$|[+-]\d{2}:?\d{2}$/.test(s);
+    const ms = new Date(hatZone ? s : s.replace(' ', 'T') + 'Z').getTime();
     return Number.isNaN(ms) ? null : ms;
+  }
+
+  // Position of a strike distance on the AS3935's own 1…40 km range, as a
+  // percentage — a marker on a scale, not a fill: 40 km is not "more" of
+  // anything than 1 km, it is further away.
+  //
+  // The bounds are the chip's, datasheet DS000385 Table 17 (1 km = overhead,
+  // then 5…40 km). Deliberately the same numbers the plausibility gate uses,
+  // because a bar drawn on a wider range than the gate admits would leave dead
+  // zones no reading can ever reach.
+  //
+  // Returns null for a missing or unusable value rather than 0 — a marker
+  // parked at the left end would read as "directly overhead", which is the
+  // most alarming thing this scale can say.
+  const DISTANCE_MIN_KM = 1;
+  const DISTANCE_MAX_KM = 40;
+
+  function distanceScalePercent(km) {
+    if (km == null) return null;
+    const v = Number(km);
+    if (!Number.isFinite(v)) return null;
+    const pct = ((v - DISTANCE_MIN_KM) / (DISTANCE_MAX_KM - DISTANCE_MIN_KM)) * 100;
+    return Math.max(0, Math.min(100, pct));
   }
 
   function rssiPct(dbm) {
@@ -232,6 +266,7 @@ const WeatherCore = (function () {
     calcDewPoint, calcFeelsLike, fmt, timeOf, humanElapsed,
     degToCompass, formatBearing, moonEmoji, moonPhaseKey,
     rssiPct, lerpHex, tempColorHex, mergeReading, rainRate, isNewTip,
+    distanceScalePercent, DISTANCE_MIN_KM, DISTANCE_MAX_KM,
     dataAgeState, meanOver, windPointerState, parseTimestampMs,
     localDayStartMs, dayArcPercent,
   };

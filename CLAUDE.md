@@ -158,6 +158,28 @@ Bucket must exist in InfluxDB: `weather` (org name as configured in `config.toml
 | `GET /api/history/today` | Today's min/max stats for card display |
 | `GET /api/indoor` | Latest BME280 reading (pressure, indoor temp/humidity) + pressure trend |
 | `GET /api/lightning` | AS3935: last strike, last event of *any* kind, today's counts per kind; 204 while the table is empty |
+
+The touch console has a **Lightning** page (`/console/`, page 6 of 8). It carries
+`age: null` on purpose: every other sensor page dims at 90 s and greys out at
+10 minutes, but here silence is the normal state and a greyed page would report
+a fault that isn't there, every quiet evening. Its liveness answer is the "last
+signal" tile instead, which names the last event of *any* kind.
+
+It also carries the **Kachelmann lightning-strength scale** as a reference
+table (0–3 kA "schwacher Brummler" … ≥ 100 kA "wilder Hausrüttler"). That is a
+*foreign* scale, shown for interest and labelled as such — it grades peak
+current in kA, which lightning-location networks derive from the arrival-time
+geometry of several stations. **Our strikes are never placed on it**, and no
+arithmetic can put them there: the AS3935's "energy" is, per the datasheet, "a
+pure number [that] has no physical meaning", and the chip's distance estimate
+comes from that same measurement, so there are not two independent quantities
+to solve. A category name attached to an invented mapping would be the §8
+artefact wearing someone else's authority.
+
+What the page does show on a scale is the one range the chip documents:
+`distance_km` on 1–40 km, as a **marker**, not a fill — 40 km is not "more" of
+anything, it is further away. No reading means no marker at all, because a
+marker parked at the left end would read as "directly overhead".
 | `GET /api/stats/daily\|monthly\|yearly` | Aggregated stats by period |
 | `GET /api/system` | Pi health (temp, load, memory, throttling) + `plausibility` discard counter |
 

@@ -298,18 +298,21 @@
       <div class="text-slate-500 text-sm mt-1">hPa</div>
     </div>
 
-    <!-- Indoor Temperature -->
+    <!-- Indoor climate — one BME280 measurement, therefore one card.
+         Split across two cards until 2026-08-06, which left nine tiles in a
+         four-column grid: 4 + 4 + 1, with the last one alone on its row. -->
     <div class="card">
-      <div data-i18n="cards.indoor_temp" class="card-label">Indoor Temp</div>
-      <div id="indoor-temp-val" class="value-medium text-orange-300">—</div>
-      <div class="text-slate-500 text-sm mt-1">°C</div>
-    </div>
-
-    <!-- Indoor Humidity -->
-    <div class="card">
-      <div data-i18n="cards.indoor_humidity" class="card-label">Indoor Humidity</div>
-      <div id="indoor-humidity-val" class="value-medium text-cyan-300">—</div>
-      <div class="text-slate-500 text-sm mt-1">%</div>
+      <div data-i18n="cards.indoor" class="card-label">Indoor</div>
+      <div class="flex items-baseline gap-2">
+        <span id="indoor-temp-val" class="value-medium text-orange-300">—</span>
+        <span class="text-slate-500 text-sm">°C</span>
+        <span id="indoor-humidity-val" class="value-medium text-cyan-300 ml-auto">—</span>
+        <span class="text-slate-500 text-sm">%</span>
+      </div>
+      <div class="flex justify-between text-xs text-slate-600 mt-1">
+        <span data-i18n="cards.indoor_temp">Indoor Temp</span>
+        <span data-i18n="cards.indoor_humidity">Indoor Humidity</span>
+      </div>
       <div class="bar-track mt-3">
         <div id="indoor-humidity-bar" class="bar-fill bg-cyan-700" style="width:0%"></div>
       </div>
@@ -505,7 +508,7 @@ const {
   MOON_PHASE_EN, TREND_ARROWS, TEMP_COLOR_STOPS, RAIN_ACTIVE_SECS,
   calcDewPoint, calcFeelsLike, fmt, timeOf: coreTimeOf, humanElapsed: coreHumanElapsed,
   degToCompass: coreDegToCompass, formatBearing, moonEmoji, moonPhaseKey,
-  rssiPct, lerpHex, tempColorHex,
+  rssiPct, lerpHex, tempColorHex, parseTimestampMs,
 } = WeatherCore;
 
 // Thin wrappers keep the existing call sites unchanged where the core now
@@ -1525,13 +1528,6 @@ async function loadIndoor() {
 // looking and unverified. The false "lightning at 8 km" events came with a
 // distance too. Display only, until a real storm has been recorded.
 
-// The API returns UTC as 'YYYY-MM-DD HH:MM:SS'. Without the explicit Z most
-// browsers read that as *local* time, which in summer makes every event look
-// two hours old.
-function parseUtc(ts) {
-  return ts ? new Date(ts.replace(' ', 'T') + 'Z') : null;
-}
-
 async function loadLightning() {
   try {
     const res = await fetch('/api/lightning');
@@ -1545,8 +1541,9 @@ async function loadLightning() {
     setText('lightning-dist-val', d.last_strike ? fmt(d.last_strike.distance_km, 0) : '—');
     setText('lightning-count-val', d.today?.lightning ?? 0);
 
-    const seen = parseUtc(d.last_event?.timestamp);
-    setText('lightning-seen-val', seen ? humanElapsed(Date.now() - seen.getTime()) : '—');
+    // The API stamps UTC without a zone marker; parseTimestampMs handles that.
+    const seen = parseTimestampMs(d.last_event?.timestamp);
+    setText('lightning-seen-val', seen ? humanElapsed(Date.now() - seen) : '—');
   } catch (_) {}
 }
 
