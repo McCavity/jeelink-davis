@@ -24,7 +24,11 @@ Copy `config.toml` and adjust for your location before running the web service.
 
 ```bash
 # Run tests (no hardware required)
-.venv/bin/pytest tests/ -v
+# `python -m pytest`, not the pytest binary: only the former puts the project
+# root on sys.path, and the `web` package is not installed by `pip install -e .`
+# (the distribution ships jeelink_davis alone). The binary fails at collection
+# with ModuleNotFoundError: No module named 'web'.
+.venv/bin/python -m pytest tests/ -v
 
 # Raw hardware sniffer — connects to JeeLink, prints everything for 60 s
 .venv/bin/python tools/sniff.py
@@ -78,6 +82,8 @@ web/
 ├── config.py         # loads config.toml
 ├── db.py             # SQLite storage layer (WAL mode, per-thread connections)
 │                     #   tables: readings (outdoor), indoor_readings (BME280)
+├── plausibility.py   # range gate in front of all three stores + discard counter
+│                     #   bounds are the manufacturer's, cited per line
 ├── reader.py         # daemon thread: drives DavisStation → broadcaster + DB
 └── static/
     ├── index.html    # single-page dashboard (Chart.js, Tailwind CDN, vanilla JS)
@@ -137,6 +143,7 @@ Bucket must exist in InfluxDB: `weather` (org name as configured in `config.toml
 | `GET /api/history/today` | Today's min/max stats for card display |
 | `GET /api/indoor` | Latest BME280 reading (pressure, indoor temp/humidity) + pressure trend |
 | `GET /api/stats/daily\|monthly\|yearly` | Aggregated stats by period |
+| `GET /api/system` | Pi health (temp, load, memory, throttling) + `plausibility` discard counter |
 
 ## Protocol (firmware 0.8e)
 

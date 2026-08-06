@@ -263,6 +263,15 @@ const PAGES = [
       const diskPct = y.disk_total_gb ? Math.round(y.disk_used_gb / y.disk_total_gb * 100) : 0;
       const tempPct = y.cpu_temp_c != null ? Math.max(0, Math.min(100, y.cpu_temp_c / 80 * 100)) : 0;
       const up = y.uptime_s != null ? `${Math.floor(y.uptime_s / 3600)}:${String(Math.floor(y.uptime_s % 3600 / 60)).padStart(2, '0')}` : '—';
+      // Implausible readings are dropped before any store sees them. That is
+      // the right call, but it makes a failing sensor look like a healthy one,
+      // so the count belongs on the wall next to the other health chips.
+      const discarded = (p) => {
+        if (!p) return `<span class="chip">${tr('console.unavailable', 'unavailable')}</span>`;
+        const total = `<span class="chip ${p.total ? 'warn' : 'ok'}">${tr('console.total', 'Total')} <b>${p.total}</b></span>`;
+        if (!p.last) return total;
+        return total + `<span class="chip warn">${p.last.source}.${p.last.field} <b>= ${p.last.value}</b></span>`;
+      };
       const flags = (half) => {
         if (!y.throttle) return `<span class="chip">${tr('console.unavailable', 'unavailable')}</span>`;
         const f = y.throttle[half];
@@ -304,6 +313,9 @@ const PAGES = [
               <div style="flex:0 0 300px"><div class="sub-d" style="margin-bottom:10px">${tr('console.core', 'CORE')}</div>
                 <div class="chips"><span class="chip">${tr('console.clock', 'Clock')} <b>${y.core_clock_hz ? (y.core_clock_hz / 1e9).toFixed(2) + ' GHz' : '—'}</b></span>
                 <span class="chip">${tr('console.voltage', 'Voltage')} <b>${y.core_volts != null ? y.core_volts.toFixed(3) + ' V' : '—'}</b></span></div>
+              </div>
+              <div style="flex:0 0 300px"><div class="sub-d" style="margin-bottom:10px">${tr('console.discarded', 'DISCARDED')}</div>
+                <div class="chips">${discarded(y.plausibility)}</div>
               </div>
             </div>
           </div>

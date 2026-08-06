@@ -440,7 +440,11 @@ async def forecast():
 
 @app.get("/api/system")
 async def system():
-    from . import system_info
+    from . import plausibility, system_info
 
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, system_info.read_system)
+    data = await loop.run_in_executor(None, system_info.read_system)
+    # Discarded readings are counted here because dropping them is otherwise
+    # invisible: a sensor that has stopped delivering plausible values would
+    # look exactly like one that is working.
+    return {**data, "plausibility": plausibility.snapshot()}
