@@ -255,6 +255,29 @@ spike rejection 2, noise floor 2, indoor mode.
   reports the last event of *any* kind for exactly that reason. The piezo test
   stimulus only works at 3–5 cm — a "failed" test at 20 cm measures the tester.
 
+### Open question: one detection is not one event
+
+**Do not build anything on the event count.** Measured 2026-08-06 with single
+piezo clicks, one stimulus each:
+
+| vendor sleep | handler period | events | burst |
+|---|---|---|---|
+| 30 ms | 36.3 ms | 28 | 972 ms |
+| 5 ms | 12.2 ms | 11 | 249 ms |
+
+The event spacing tracks the IRQ handler's own period to the millisecond, in
+both runs — so the counter is paced by this loop, not by the sensor. The count
+also does not scale the way a fixed-duration signal sampled faster would, which
+rules out the obvious explanation. The unverified hypothesis is that the
+handler's own I²C reads sustain the disturbance (this sensor fires on I²C
+traffic on its own bus — §4 of the integration plan).
+
+Consequences until that is measured: a burst count is not a measure of physical
+activity, and the quiet-room baseline in the plan should be read as isolated
+events only. `unknown` is the interrupt register reporting no valid bit — a
+failed read, not a detection — and storing them as events inflates every total.
+Whether they belong in the table at all is part of the same open question.
+
 **Out of scope until a real storm has been recorded:** no header warning, no
 beacon, no threshold logic. Nothing this sensor has reacted to so far has been
 verified against an independent source, and an alarm on an unvalidated sensor

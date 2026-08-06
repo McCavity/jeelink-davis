@@ -134,7 +134,10 @@ class DFRobot_AS3935:
     #definition of interrupt data on table 18 of datasheet
     #for this function:
     #0 = unknown src, 1 = lightning detected, 2 = disturber, 3 = Noise level too high
-    time.sleep(0.03) #wait 3ms before reading (min 2ms per pg 22 of datasheet)
+    # PATCH 3 (2026-08-06): upstream sleeps 0.03 while its own comment says 3 ms
+    # and the datasheet asks for 2 — almost certainly a typo for 0.003. Measured
+    # consequences in web/vendor/__init__.py; 5 ms is conservative above both.
+    time.sleep(0.005) #wait 5ms before reading (min 2ms per pg 22 of datasheet)
     self.sing_reg_read(0x03) #read register, get rid of non-interrupt data
     intSrc = self.register[0]&0x0F
     if intSrc == 0x08:
