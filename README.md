@@ -229,6 +229,12 @@ git pull
 sudo ./update.sh
 ```
 
+`update.sh` also installs `davis-weather.service` and reloads systemd **if the
+unit changed** — the unit lives in `/etc/systemd/system/`, outside the directory
+the file sync covers. Before 2026-08-06 it was skipped entirely, so a changed
+unit was copied into `/opt` as an inert file while the running unit kept its old
+content: a deploy that reported success and changed nothing.
+
 **Service management:**
 
 ```bash
