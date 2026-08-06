@@ -74,6 +74,7 @@ rsync -a --delete \
     --exclude='*.egg-info/' \
     --exclude='.pytest_cache/' \
     --exclude='config.toml' \
+    --exclude='.lgd-nfy*' \
     ./ "$INSTALL_DIR/"
 
 # Ownership, here and not at the end. rsync runs as root and -a preserves the
@@ -110,7 +111,13 @@ if grep -qE '^\s*\[lightning\]' "$INSTALL_DIR/config.toml" 2>/dev/null; then
     # and python3-lgpio prebuilt; pip would rebuild the same C extension from
     # source and needs swig, which a weather-station Pi has no reason to carry.
     # Installing here is not this script's business — it says what is missing.
-    if ! python3 -c 'import RPi.GPIO' 2>/dev/null; then
+    # Aus einem neutralen Verzeichnis: `import lgpio` legt seine
+    # Benachrichtigungs-FIFO `.lgd-nfy<n>` im ARBEITSVERZEICHNIS an, und das ist
+    # hier der Git-Checkout. Als root ausgefuehrt hinterliess die Pruefung dort
+    # eine root-eigene FIFO, die der Sync anschliessend nach $INSTALL_DIR
+    # kopierte -- und die einen `diff` zwischen Checkout und Installation
+    # scheitern liess, weil diff FIFOs nicht vergleichen kann (06.08.2026).
+    if ! (cd /tmp && python3 -c 'import RPi.GPIO') 2>/dev/null; then
         echo "ERROR: the AS3935 needs the RPi.GPIO shim, which is not installed." >&2
         echo "       sudo apt install python3-rpi-lgpio" >&2
         echo "       (do NOT install RPi.GPIO or pip-install rpi-lgpio alongside it)" >&2
@@ -126,7 +133,7 @@ if grep -qE '^\s*\[lightning\]' "$INSTALL_DIR/config.toml" 2>/dev/null; then
     printf '%s\n' /usr/lib/python3/dist-packages > "$SITE_PACKAGES/zz-system-gpio.pth"
     chown "$SERVICE_USER:$SERVICE_USER" "$SITE_PACKAGES/zz-system-gpio.pth"
 
-    if ! "$INSTALL_DIR/.venv/bin/python" -c 'import RPi.GPIO' 2>/dev/null; then
+    if ! (cd /tmp && "$INSTALL_DIR/.venv/bin/python" -c 'import RPi.GPIO') 2>/dev/null; then
         echo "ERROR: the venv still cannot import RPi.GPIO after linking the" >&2
         echo "       system packages. Do the venv and /usr/bin/python3 have the" >&2
         echo "       same Python version?" >&2

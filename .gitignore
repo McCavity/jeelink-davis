@@ -31,3 +31,8 @@ data/*.db-shm
 # Local configuration — contains personal location data and credentials.
 # Copy config.toml.example to config.toml and fill in your values.
 config.toml
+
+# lgpio legt seine Benachrichtigungs-FIFO im Arbeitsverzeichnis an.
+# Kein Artefakt dieses Projekts, aber es landet hier, sobald etwas
+# RPi.GPIO aus dem Repo heraus importiert.
+.lgd-nfy*
