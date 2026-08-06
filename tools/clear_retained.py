@@ -12,6 +12,10 @@ Default is READ-ONLY: it lists what is retained and exits. ``--clear`` retracts,
 then re-reads and reports what is left, so the result is a measurement rather
 than an assertion.
 
+Not every broker deletes on an empty payload. The ioBroker MQTT adapter sets the
+state to null and republishes it, so the topic survives carrying ``null``. The
+report distinguishes the three outcomes: gone, neutralised, or untouched.
+
     python tools/clear_retained.py --prefix 'davis/weather/#'
     python tools/clear_retained.py --prefix 'davis/weather/#' --clear
 
@@ -123,11 +127,31 @@ def main() -> int:
     for topic in sorted(after):
         print(f"  {topic} = {after[topic]!r}")
 
-    if after:
-        print("\nNOT clean — some topics still carry a retained payload.")
-        return 1
-    print("\nClean: the broker no longer serves a value under this prefix.")
-    return 0
+    if not after:
+        print("\nClean: the broker no longer serves a value under this prefix.")
+        return 0
+
+    # Not every broker deletes on an empty payload. The ioBroker MQTT adapter,
+    # for one, treats it as "set the state to null" and re-publishes *that* —
+    # so the topic survives carrying 'null' or ''. That is not a failure: the
+    # misleading value is gone and null is an honest "no value". But it is also
+    # not deletion, and reporting it as one would be the kind of half-truth this
+    # tool exists to avoid.
+    NEUTRAL = {"", "null", "None", "nan"}
+    verblieben = {t: v for t, v in after.items() if v not in NEUTRAL}
+
+    if not verblieben:
+        print("\nValues cleared, but the topics still exist — the broker replaced")
+        print("them instead of deleting them (the ioBroker MQTT adapter does this:")
+        print("an empty payload sets the state to null and republishes it).")
+        print("Nothing misleading is served any more. To remove the objects")
+        print("themselves, delete them in the broker/adapter — MQTT cannot.")
+        return 0
+
+    print(f"\nNOT clean — {len(verblieben)} topic(s) still carry a real value:")
+    for topic in sorted(verblieben):
+        print(f"  {topic} = {verblieben[topic]!r}")
+    return 1
 
 
 if __name__ == "__main__":

@@ -45,11 +45,27 @@ stops arriving, the derived value must not outlive it: the topic is retracted
 with an empty retained payload instead of quietly keeping the last one.
 
 This is not hypothetical. ``davis/weather/feels_like`` stood at 17.9 °C from
-2026-04-24 to 2026-08-06 — 103 days. The cause is upstream: a JeeLink firmware
-defect suppresses field 4/5 (wind speed and direction), so no wind value ever
-arrived again, the field was skipped on every publish, and April's retained
-message survived. In ioBroker the state looked perfectly alive. Retracting does
-not fix the firmware — it stops the lie.
+2026-04-24 to 2026-08-06 — 103 days, looking perfectly alive in ioBroker.
+
+The cause was **this computation, not the sensor**. Measured on 2026-08-06 over
+30 minutes of live traffic:
+
+    15 279 packets       temperature in 25 %
+                         humidity    in 11 %
+                         wind speed  in 50 %
+    all three in ONE packet:  0 of 15 279
+
+The previous version computed the apparent temperature from a single packet, so
+at least one input was always ``None`` and the field was skipped on every
+publish — the retained message from April simply survived. Deriving from the
+freshest value of each input is therefore the *fix*, not a workaround.
+
+An earlier version of this docstring blamed a JeeLink firmware defect (it
+suppresses field 4/5 under some conditions). That was a plausible chain built
+from a known upstream bug — and wrong: wind speed is in fact the most frequently
+transmitted of the three. The retraction path below is still needed, but for the
+honest reason: an input can genuinely stop, and then the derived value must not
+outlive it.
 """
 
 from __future__ import annotations
