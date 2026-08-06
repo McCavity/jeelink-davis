@@ -135,8 +135,50 @@ bis ihr TTL ablaeuft. Und danach am Artefakt nachmessen, nicht am Pi:
 curl -sI https://wetter.halfpap.io/static/js/console.js | grep -iE 'cache-control|cf-cache-status|age'
 ```
 
-Erwartet: `cache-control: no-cache`. Bleibt `max-age=14400` stehen, greift die
-Regel nicht.
+### Gemessenes Ergebnis (2026-08-06, nach Regel + Purge + Deploy)
+
+```
+Abruf 1: cache-control: no-cache | cf-cache-status: MISS
+Abruf 2: cache-control: no-cache | cf-cache-status: REVALIDATED
+Abruf 3: cache-control: no-cache | cf-cache-status: REVALIDATED
+```
+
+**`REVALIDATED` ist der Sollzustand**, nicht `BYPASS`. Cloudflare behaelt das
+Objekt am Edge und fragt vor jeder Auslieferung beim Origin nach — die offene
+Frage, ob `no-cache` den Edge-Cache ganz abschaltet, ist damit beantwortet: tut
+es nicht. Schnell und trotzdem nie veraltet.
+
+Dass die Rueckfrage billig ist, steht nicht als Annahme da, sondern im
+Origin-Log: erster Abruf `200`, jede Revalidierung danach `304` — kein Koerper
+wird erneut uebertragen.
+
+```
+GET /static/js/console.js HTTP/1.1" 200
+GET /static/js/console.js HTTP/1.1" 304
+GET /static/js/console.js HTTP/1.1" 304
+```
+
+Gegengeprueft, dass die API ihr eigenes Caching behalten hat — ein pauschales
+`no-cache` haette den heruntergezaehlten `max-age` zerstoert, hinter dem die
+26-Sekunden-Abfrage sitzt:
+
+```
+/api/stats/yearly  cache-control: public, max-age=300  cf-cache-status: MISS
+/api/rain/totals   cache-control: public, max-age=300  cf-cache-status: EXPIRED
+```
+
+### Zwei Punkte fuer den naechsten Fall
+
+**Eine Cache Rule wirft nicht raus, was schon im Cache liegt.** Direkt nach dem
+Anlegen der Regel war `de.json` bereits `BYPASS` und aktuell, `console.js` aber
+weiter `HIT` und sieben Stunden alt — der Unterschied war allein, dass das eine
+schon im Cache lag und das andere nicht. Ohne Purge haette die Regel wie ein
+Fehlschlag ausgesehen.
+
+**Gezielt per URL purgen, nicht „Alles loeschen".** Ein Komplett-Purge nimmt
+auch `/api/stats/*` mit, und dahinter stehen die Abfragen, die den Host schon
+einmal auf 75 °C gebracht haben. Purge nach Praefix oder Hostname waere
+eleganter, ist aber Enterprise.
 
 > Die Alternative waere, die Zone-Einstellung auf „Respect Existing Headers"
 > zu stellen. Das wirkt global — die Regel trifft nur diesen Pfad, und sie
