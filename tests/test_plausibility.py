@@ -51,7 +51,7 @@ def stores(monkeypatch):
         influxdb_writer, "push", lambda p, m: geschrieben["influx"].append((p, m))
     )
     monkeypatch.setattr(
-        mqtt_publisher, "push", lambda p: geschrieben["mqtt"].append(p)
+        mqtt_publisher, "push", lambda p, quelle: geschrieben["mqtt"].append((quelle, p))
     )
     return geschrieben
 
@@ -95,6 +95,7 @@ def test_gutes_sample_erreicht_alle_drei_stores(stores):
     assert len(stores["mqtt"]) == 1
     assert stores["db"][0]["pressure"] == 1001.72
     assert stores["influx"][0][1] == "indoor"
+    assert stores["mqtt"][0][0] == "indoor", "MQTT muss dieselbe Quelle tragen"
 
 
 def test_nullsample_wird_als_warnung_geloggt(stores, caplog):
@@ -196,7 +197,7 @@ def outdoor_stores(monkeypatch):
         influxdb_writer, "push", lambda p, m: geschrieben["influx"].append((p, m))
     )
     monkeypatch.setattr(
-        mqtt_publisher, "push", lambda p: geschrieben["mqtt"].append(p)
+        mqtt_publisher, "push", lambda p, quelle: geschrieben["mqtt"].append((quelle, p))
     )
     return geschrieben
 

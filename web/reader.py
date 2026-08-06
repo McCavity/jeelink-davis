@@ -56,7 +56,7 @@ def _handle_reading(reading, loop: asyncio.AbstractEventLoop) -> dict:
     except Exception:
         logger.exception("DB insert failed — reading not persisted")
     influxdb_writer.push(payload, "outdoor")
-    mqtt_publisher.push(payload)
+    mqtt_publisher.push(payload, "outdoor")
     asyncio.run_coroutine_threadsafe(broadcaster.broadcast(payload), loop)
     return payload
 

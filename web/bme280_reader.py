@@ -63,7 +63,7 @@ def _handle_sample(sample) -> dict | None:
     except Exception:
         logger.exception("BME280 DB insert failed")
     influxdb_writer.push(reading, "indoor")
-    mqtt_publisher.push(reading)
+    mqtt_publisher.push(reading, "indoor")
     return reading
 
 
