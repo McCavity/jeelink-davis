@@ -88,6 +88,7 @@ rsync -a --delete \
     --exclude='*.egg-info/' \
     --exclude='.pytest_cache/' \
     --exclude='config.toml' \
+    --exclude='.lgd-nfy*' \
     ./ "$INSTALL_DIR/"
 
 # config.toml is gitignored, so the source tree never carries one — without
