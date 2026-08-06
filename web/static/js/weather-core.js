@@ -149,9 +149,20 @@ const WeatherCore = (function () {
   // Returns null (not NaN, not "now") when the field is missing or the
   // string doesn't parse, so a bad/absent timestamp reads as unknown age
   // rather than as fresh.
+  //
+  // Two formats reach this function, and only one of them says so:
+  //   /api/latest     '2026-04-23T14:30:00+00:00'   — carries its offset
+  //   /api/lightning  '2026-08-06 19:01:43.481902'  — UTC, but unmarked
+  // The second is what SQLite stores for the indoor and lightning tables. Left
+  // to `new Date()`, a string with no zone is read as *local* time, so every
+  // event would look two hours old in a German summer — plausible enough to go
+  // unnoticed, which is exactly what makes it worth handling in one place
+  // rather than at each call site.
   function parseTimestampMs(iso) {
     if (!iso) return null;
-    const ms = new Date(iso).getTime();
+    const s = String(iso);
+    const hatZone = /[Zz]$|[+-]\d{2}:?\d{2}$/.test(s);
+    const ms = new Date(hatZone ? s : s.replace(' ', 'T') + 'Z').getTime();
     return Number.isNaN(ms) ? null : ms;
   }
 

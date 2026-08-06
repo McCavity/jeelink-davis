@@ -141,6 +141,26 @@ test('parseTimestampMs parses an ISO 8601 string with an offset', () => {
     Date.parse('2026-07-25T13:24:00.660+00:00'));
 });
 
+test('parseTimestampMs reads an unmarked stamp as UTC, not local time', () => {
+  // What /api/lightning and the SQLite indoor/lightning tables store: UTC, but
+  // with nothing in the string that says so. Read as local time it would be off
+  // by the runtime's offset — two hours in a German summer, and plausible
+  // enough to pass for a real delay.
+  assert.equal(WC.parseTimestampMs('2026-08-06 19:01:43.481902'),
+               Date.UTC(2026, 7, 6, 19, 1, 43, 481));
+  assert.equal(WC.parseTimestampMs('2026-08-06 19:01:43'),
+               Date.UTC(2026, 7, 6, 19, 1, 43));
+});
+
+test('parseTimestampMs leaves an explicit zone alone', () => {
+  // The regression that the change above could have caused: appending Z to a
+  // string that already carries an offset would shift every /api/latest age.
+  assert.equal(WC.parseTimestampMs('2026-07-25T13:24:00.660069+02:00'),
+               Date.parse('2026-07-25T13:24:00.660069+02:00'));
+  assert.equal(WC.parseTimestampMs('2026-07-25T13:24:00Z'),
+               Date.parse('2026-07-25T13:24:00Z'));
+});
+
 test('parseTimestampMs returns null for missing or unparseable input, not NaN/now', () => {
   assert.equal(WC.parseTimestampMs(null), null);
   assert.equal(WC.parseTimestampMs(undefined), null);

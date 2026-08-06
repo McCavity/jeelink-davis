@@ -37,6 +37,7 @@
     "pressure_trend_unknown": "No trend data yet",
     "indoor_temp":      "Indoor Temp",
     "indoor_humidity":  "Indoor Humidity",
+    "indoor":               "Indoor climate",
     "lightning":            "Lightning",
     "lightning_today":      "Strikes today",
     "lightning_last_event": "Last signal",
@@ -192,6 +193,17 @@
     "since_boot":   "SINCE BOOT",
     "core":         "CORE",
     "calm":         "calm",
-    "no_data_since":"no data since"
+    "no_data_since":"no data since",
+    "lightning":         "Lightning",
+    "last_strike":       "Last strike",
+    "energy":            "energy",
+    "no_strike_yet":     "none recorded yet",
+    "disturbers":        "disturbers",
+    "other":             "other",
+    "kind":              "kind",
+    "kind_lightning":    "lightning",
+    "kind_disturber":    "disturber",
+    "kind_noise":        "noise",
+    "kind_unknown":      "unknown"
   }
 }

@@ -158,6 +158,12 @@ Bucket must exist in InfluxDB: `weather` (org name as configured in `config.toml
 | `GET /api/history/today` | Today's min/max stats for card display |
 | `GET /api/indoor` | Latest BME280 reading (pressure, indoor temp/humidity) + pressure trend |
 | `GET /api/lightning` | AS3935: last strike, last event of *any* kind, today's counts per kind; 204 while the table is empty |
+
+The touch console has a **Lightning** page (`/console/`, page 6 of 8). It carries
+`age: null` on purpose: every other sensor page dims at 90 s and greys out at
+10 minutes, but here silence is the normal state and a greyed page would report
+a fault that isn't there, every quiet evening. Its liveness answer is the "last
+signal" tile instead, which names the last event of *any* kind.
 | `GET /api/stats/daily\|monthly\|yearly` | Aggregated stats by period |
 | `GET /api/system` | Pi health (temp, load, memory, throttling) + `plausibility` discard counter |
 

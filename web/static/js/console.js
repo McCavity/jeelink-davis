@@ -23,6 +23,8 @@ const state = {
   outdoor: null, outdoorAt: null,
   indoor: null,  indoorAt: null,
   today: null, rainTotals: null, solar: null, system: null, systemAt: null,
+  lightning: null,       // /api/lightning; no *At stamp — the lightning
+                         // page deliberately has no age indicator.
   windSamples: [],       // [{ t, v }] for the 10-minute mean
   windAt: null,          // timestamp of the last reading that actually carried
                           // wind data — outdoorAt advances on every partial
@@ -229,6 +231,50 @@ const PAGES = [
             `<div class="row"><span class="med violet">${fmt(i.pressure, 1)}<span class="unit-s">hPa</span></span>
              <span class="sub violet">${TREND_ARROWS[i.pressure_trend] || TREND_ARROWS.unknown}</span></div>`,
             '', { style: 'flex:0 0 150px' })}
+        </div>`;
+    } },
+  // age: null on purpose. Every other sensor page dims at 90 s and greys out
+  // at 10 minutes, because for them silence means the sensor stopped. Here
+  // silence is the normal state — a lightning page that greyed itself out on
+  // a quiet evening would report a fault that isn't there, every evening.
+  //
+  // The liveness answer is the "last signal" tile instead: it names the last
+  // event of *any* kind, disturbers included. A quiet sky and a disconnected
+  // IRQ wire produce an identical empty log, and this is the only thing on the
+  // console that tells them apart.
+  //
+  // No colour change, no flashing, no auto-switch to this page. This sensor
+  // has never been checked against a real thunderstorm, and an alarm on a wall
+  // display would be exactly the authoritative-looking artefact that must not
+  // be built until it has. See §8 of the integration plan.
+  { id: 'lightning', title: 'Lightning', age: null, render: (root, s) => {
+      const l = s.lightning || {};
+      const strike = l.last_strike, ereignis = l.last_event, heute = l.today || {};
+      const seenMs = parseTimestampMs(ereignis && ereignis.timestamp);
+      const seen = seenMs == null ? '—' : humanElapsed(Date.now() - seenMs, tr);
+      root.innerHTML = `
+        <div class="col" style="flex:1">
+          <div class="tile" style="flex:1">
+            <div class="lbl">${tr('console.last_strike', 'Last strike')}</div>
+            <div class="huge amber value" style="font-size:172px;margin-top:10px">${
+              strike ? fmt(strike.distance_km, 0) : '—'}<span class="unit">km</span></div>
+            <div class="sub-d value">${strike
+              ? `${timeOf(new Date(parseTimestampMs(strike.timestamp)).toISOString(), LOCALE)}
+                 · ${tr('console.energy', 'energy')} ${fmt(strike.energy, 2)}`
+              : tr('console.no_strike_yet', 'none recorded yet')}</div>
+          </div>
+        </div>
+        <div class="col" style="flex:1">
+          ${tile(tr('cards.lightning_today', 'Strikes today'),
+            `<span class="huge amber" style="font-size:150px">${heute.lightning ?? 0}</span>`,
+            `${tr('console.disturbers', 'disturbers')} ${heute.disturber ?? 0} · ${
+              tr('console.other', 'other')} ${(heute.noise ?? 0) + (heute.unknown ?? 0)}`,
+            { style: 'flex:1' })}
+          ${tile(tr('cards.lightning_last_event', 'Last signal'),
+            `<span class="med slate">${seen}</span>`,
+            ereignis ? `${tr('console.kind', 'kind')} ${
+              tr('console.kind_' + ereignis.kind, ereignis.kind)}` : '',
+            { style: 'flex:0 0 150px' })}
         </div>`;
     } },
   { id: 'status', title: 'Status', age: 'outdoor', render: (root, s) => {
@@ -685,6 +731,15 @@ async function pollRainTotals() {
   if (d) state.rainTotals = d;
   renderCurrent();
 }
+// Cheap, unlike the two above: three small queries against an indexed table
+// that holds a handful of rows per day. 60 s is safe here and does not need
+// the staggering the rain endpoints do.
+async function pollLightning() {
+  const d = await getJSON('/api/lightning');
+  // 204 (nothing recorded yet) yields null and must NOT overwrite a previous
+  // answer — the table only ever grows, so a null here is a failed fetch.
+  if (d) { state.lightning = d; renderCurrent(); }
+}
 async function pollSolar() {
   const d = await getJSON('/api/solar');
   if (d) { state.solar = d; renderCurrent(); }
@@ -692,6 +747,7 @@ async function pollSolar() {
 
 function startPolling() {
   pollIndoor(); setInterval(pollIndoor, 30_000);
+  pollLightning(); setInterval(pollLightning, 60_000);
   // Both slow endpoints are still fetched once here at boot, so first paint
   // is complete — only their periodic cadence moves off the old 60s poll.
   pollToday();
