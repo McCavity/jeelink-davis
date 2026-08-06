@@ -405,6 +405,57 @@ class TestMqttRetraction:
 
 
 # ──────────────────────────────────────────────────────────────────────────
+# The read-back line has to be *visible*
+# ──────────────────────────────────────────────────────────────────────────
+
+class TestLoggingVisibility:
+    """The settings read-back is the only evidence the sensor listens at the
+    sensitivity it was calibrated at — and on 2026-08-06 that line never
+    reached the journal, because uvicorn leaves the root logger alone and INFO
+    fell on the floor. "No error in the log" was then the only thing to go on,
+    which proves nothing when the channel itself is mute.
+    """
+
+    def test_package_info_lines_are_emitted(self, capsys):
+        import logging
+        from web.app import _configure_logging
+
+        log = logging.getLogger("web")
+        vorher = list(log.handlers)
+        log.handlers.clear()
+        try:
+            _configure_logging()
+            logging.getLogger("web.lightning_reader").info("AS3935 ready — indoor")
+            assert "AS3935 ready — indoor" in capsys.readouterr().err
+        finally:
+            log.handlers.clear()
+            log.handlers.extend(vorher)
+
+    def test_calling_it_twice_does_not_double_every_line(self, capsys):
+        """The lifespan can run more than once in one process — under TestClient
+        it does. Without the handler guard the second call stacks a second
+        handler and every line from then on appears twice, which quietly
+        doubles anything one later counts in the journal.
+        """
+        import logging
+        from web.app import _configure_logging
+
+        log = logging.getLogger("web")
+        vorher, vorher_prop = list(log.handlers), log.propagate
+        log.handlers.clear()
+        try:
+            _configure_logging()
+            _configure_logging()
+            assert len(log.handlers) == 1
+            logging.getLogger("web.lightning_reader").info("einmal")
+            assert capsys.readouterr().err.count("einmal") == 1
+        finally:
+            log.handlers.clear()
+            log.handlers.extend(vorher)
+            log.propagate = vorher_prop
+
+
+# ──────────────────────────────────────────────────────────────────────────
 # The database queries behind /api/lightning
 # ──────────────────────────────────────────────────────────────────────────
 

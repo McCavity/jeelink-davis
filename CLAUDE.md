@@ -212,12 +212,26 @@ DFRobot AS3935 on I²C bus 1 at **0x03**, IRQ on physical pin 7 (GPIO4), powered
 from **3.3 V** — the IRQ swings to VCC level, so 5 V would drive 5 V into a GPIO
 input. The IRQ lead runs straight to the Pi and not through the I²C hub, which
 carries only VCC/GND/SDA/SCL. Enabled by a `[lightning]` section in
-`config.toml`; without it the thread is never started. Needs the `[lightning]`
-extra (`rpi-lgpio`) **and** the service user in the `gpio` group —
-`/dev/gpiochip*` is `root:gpio` mode 660, so without it the lightning thread
-dies at `GPIO.setup()` while everything else comes up normally. `update.sh`
-installs the extra when it finds the section and adds the group if it is
-missing; the restart afterwards is what makes systemd re-read the group list.
+`config.toml`; without it the thread is never started.
+
+Two deployment prerequisites, both handled by `update.sh` once the section
+exists — and both found the hard way on 2026-08-06:
+
+- **The `RPi.GPIO` shim comes from apt, not pip**: `sudo apt install
+  python3-rpi-lgpio`. Raspberry Pi OS ships it prebuilt; `pip install rpi-lgpio`
+  rebuilds the same C extension from source and dies with `error: command
+  'swig' failed`. `update.sh` writes a `.pth` so the venv sees the system
+  packages (same effect as `--system-site-packages`, appended, so venv packages
+  keep precedence) and refuses to continue if the shim is absent.
+- **The service user must be in the `gpio` group** — `/dev/gpiochip*` is
+  `root:gpio` mode 660, so otherwise the thread dies at `GPIO.setup()` while
+  everything else comes up normally. The restart is when systemd re-reads it.
+
+**lgpio creates its notification FIFO (`.lgd-nfy<n>`) in the working directory**,
+which for the service is `/opt/jeelink-davis`. If the tree is not owned by the
+service user, the thread dies with `FileNotFoundError: '.lgd-nfy-3'` — a message
+that names neither GPIO nor a permission. `update.sh` therefore chowns straight
+after the file sync, so an abort in a later step cannot leave that state behind.
 
 **Calibrated values, measured on this unit 2026-08-06 — do not change without
 measuring again:** 96 pF antenna capacitance (scope on the IRQ pin in LCO mode,
