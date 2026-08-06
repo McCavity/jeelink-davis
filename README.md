@@ -98,6 +98,40 @@ flowchart LR
 
 A GY-BME280 connected to the Raspberry Pi I²C bus provides barometric pressure, indoor temperature, and indoor humidity. The I²C address and bus number are configured in `config.toml` (defaults: bus `1`, address `0x76`). It is polled every 60 s by a background thread and stored in a separate `indoor_readings` SQLite table. Pressure trend compares the average of the last 30 min against the average of the 2–4 h ago window — effectively a 3-hour rolling comparison (±0.5 hPa threshold → rising / falling / steady).
 
+### Plausibility gate
+
+Both reader threads check every value against the manufacturer's range before
+anything is written. Bounds and their sources live in `web/plausibility.py`:
+BME280 datasheet BST-BME280-DS001-23 for the indoor sensor, the Vantage Pro 2
+product specification and the Davis 6450/6490 sensor spec sheets for the
+outdoor one. Fields with no published range — `rssi`, `voltage_solar`,
+`voltage_capacitor`, `rain_secs` — are deliberately left unchecked.
+
+The two sensors are treated differently because they fail differently:
+
+- **BME280** — one implausible value discards the whole sample. Its three
+  values come from a single measurement over a single I²C transaction, and the
+  failure that prompted this (a mis-wired sensor returning a well-formed
+  all-zero sample) produced three zeros at once.
+- **Davis ISS** — only the offending field is discarded, as `None`. A packet
+  carries just some of the fields, and line noise corrupts a digit rather than
+  a packet, so dropping everything would throw away the wind, rain and RSSI
+  that arrived intact. Because absent already means "not carried by this
+  packet", the payload additionally carries `rejected_fields` — `{field: value}`,
+  empty when nothing was rejected — so a consumer can tell a rejection from an
+  omission.
+
+Discards are counted and served under `plausibility` by `/api/system`, and
+shown on the console's system page. A rejection that only reached the log would
+leave a sensor which has quietly stopped delivering plausible values looking
+identical to a healthy one.
+
+**What this does not catch.** The gate rejects the impossible — dropouts to
+zero, wild outliers, NaN. It does not catch a corrupted digit: a bit error
+turns 21.3 °C into 27.3 °C far more readily than into 999, and 27.3 passes
+every bound. Data that has been through the gate is free of the impossible, not
+verified.
+
 ## Requirements
 
 - Python 3.11+
@@ -239,10 +273,16 @@ with DavisStation(port="/dev/ttyUSB0") as station:
 
 ```bash
 pip install -e ".[dev]"
-.venv/bin/pytest tests/ -v
+.venv/bin/python -m pytest tests/ -v
 ```
 
 Tests do not require hardware — the serial port is fully mocked.
+
+`python -m pytest` rather than the `pytest` binary: only the former puts the
+project root on `sys.path`, and the `web` package is not installed by
+`pip install -e .` (the distribution ships `jeelink_davis` alone). Calling the
+binary directly fails at collection with `ModuleNotFoundError: No module named
+'web'`.
 
 ## Data model
 
