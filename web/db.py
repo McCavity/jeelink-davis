@@ -87,13 +87,19 @@ CREATE INDEX IF NOT EXISTS idx_lightning_ts ON lightning_events (timestamp);
 # Verified 2026-07-26 against both switch days: 2026-10-25 yields a 25-hour day,
 # 2026-03-29 a 23-hour day.
 #
-# The two tables store timestamps in different *lexical* formats, both UTC:
-#     readings.timestamp         '2026-07-26T09:03:03.597292+00:00'
-#     indoor_readings.timestamp  '2026-07-26 09:26:33'
+# The tables store timestamps in different *lexical* formats, all UTC:
+#     readings.timestamp          '2026-07-26T09:03:03.597292+00:00'
+#     indoor_readings.timestamp   '2026-07-26 09:26:33'
+#     lightning_events.timestamp  '2026-07-26 09:26:33.481902'
 # The comparison is a string comparison, so a bound in the wrong format matches
 # the wrong rows *silently*: ' ' sorts before 'T', so a space-separated bound
 # would admit every 'T' row of the same date regardless of its time. Always pass
 # the format constant belonging to the table being queried.
+#
+# lightning_events shares the indoor format and adds microseconds (see
+# lightning_reader for why). It therefore uses _TS_FMT_INDOOR as well: the
+# bounds are truncated to whole seconds, and a longer string sharing that
+# prefix still sorts on the correct side of the bound.
 _TS_FMT_READINGS = "%Y-%m-%dT%H:%M:%S"   # readings
 _TS_FMT_INDOOR   = "%Y-%m-%d %H:%M:%S"   # indoor_readings
 

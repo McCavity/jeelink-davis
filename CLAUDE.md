@@ -82,7 +82,7 @@ web/
 ├── config.py         # loads config.toml
 ├── db.py             # SQLite storage layer (WAL mode, per-thread connections)
 │                     #   tables: readings (outdoor), indoor_readings (BME280),
-│                     #           lightning_events (AS3935)
+│                     #           lightning_events (AS3935, µs timestamps)
 ├── lightning_reader.py # daemon threads: AS3935 IRQ callback + event worker
 ├── plausibility.py   # range gate in front of all three stores + discard counter
 │                     #   bounds are the manufacturer's, cited per line
@@ -127,7 +127,11 @@ InfluxDB v2 export is optional. Configure in `config.toml` under `[influxdb]` an
 **Measurements written:**
 - `outdoor` — all Davis ISS fields; tag: `station_id`
 - `indoor`  — BME280 fields: `temperature`, `humidity`, `pressure`
-- `lightning` — AS3935: `distance_km`, `energy`, `strike_count`; tag: `kind`
+- `lightning` — AS3935: `distance_km`, `energy`, `strike_count`; tag: `kind`.
+  Timestamps carry **microseconds**: InfluxDB deduplicates on
+  `(measurement, tags, timestamp)`, and at second resolution a burst collapses
+  into one point per second. Measured 2026-08-06 — 137 events in 13 distinct
+  seconds became 13 points, an undercount with nothing to indicate it.
 
 **Backfill existing data:**
 ```bash
