@@ -80,6 +80,71 @@ verfügbar). Ohne das ist der Cache **pro Rechenzentrum** getrennt, und ein
 über viele Standorte verteilter Abruf könnte den Pi trotz Cache Rule
 vervielfacht treffen. Tiered Cache bündelt das über einen oberen Knoten.
 
+## 1b. Statische Dateien — offen, und der Grund steht in der Zone
+
+> [!warning] Ein Deploy erreicht bis zu vier Stunden lang niemanden
+> Gemessen am 2026-08-06, nachdem eine deployte Konsolenseite auf dem Kiosk
+> nicht ankam:
+>
+> ```
+> GET /static/js/console.js
+>   cf-cache-status: HIT
+>   age:             4808
+>   cache-control:   max-age=14400
+>   last-modified:   sieben Stunden aelter als die Datei auf dem Pi
+> ```
+>
+> Das `max-age` kommt nicht vom Origin — der schickte damals gar keines.
+
+Zwei Zone-Einstellungen greifen ineinander, beide im Dashboard nachgesehen:
+
+| Einstellung | Wert | Wirkung hier |
+|---|---|---|
+| Caching-Level | Standard | cacht `.js`/`.css` nach Dateiendung, ohne Regel |
+| Browser-Cache-TTL | **4 Stunden** | setzt `max-age=14400` fuer den Browser |
+
+Der zweite Punkt ist der entscheidende: ein **fester** Browser-Cache-TTL
+ueberstimmt den `Cache-Control` des Origins ([Cloudflare-Doku][bttl]). Nur
+„Respect Existing Headers" laesst den Origin-Header durch. Ein Header im Code
+allein aendert also nichts — er wird unterwegs ersetzt.
+
+HTML und JSON sind davon nicht betroffen: sie sind `DYNAMIC` (keine
+Standard-Cache-Endung) und tragen gar keinen Header, dort greift die Heuristik
+der Browser.
+
+**Der Code schickt seit PR #25 `Cache-Control: no-cache` auf `/`, `/console/`
+und `/static/*`.** Das reicht fuer alles, was den Pi direkt anspricht — den
+Konsolen-Kiosk im LAN etwa. Fuer den Weg durch den Tunnel fehlt die Gegenseite:
+
+**Caching → Cache Rules → Create rule**, Name `static-revalidate`:
+
+```
+(http.host eq "wetter.halfpap.io" and starts_with(http.request.uri.path, "/static/"))
+```
+
+| Feld | Wert |
+|---|---|
+| Cache eligibility | Eligible for cache |
+| Edge TTL | Use cache-control header if present |
+| Browser TTL | **Respect origin** |
+
+Danach **einmalig purgen** — sonst liefert der Edge die alte Fassung weiter,
+bis ihr TTL ablaeuft. Und danach am Artefakt nachmessen, nicht am Pi:
+
+```bash
+curl -sI https://wetter.halfpap.io/static/js/console.js | grep -iE 'cache-control|cf-cache-status|age'
+```
+
+Erwartet: `cache-control: no-cache`. Bleibt `max-age=14400` stehen, greift die
+Regel nicht.
+
+> Die Alternative waere, die Zone-Einstellung auf „Respect Existing Headers"
+> zu stellen. Das wirkt global — die Regel trifft nur diesen Pfad, und sie
+> steht neben `api-aggregate-cache`, das aus demselben Grund `respect_origin`
+> benutzt und keinen Override.
+
+[bttl]: https://developers.cloudflare.com/cache/how-to/edge-browser-cache-ttl/set-browser-ttl/
+
 ## 2. Rate Limiting
 
 **Security → WAF → Rate limiting rules**

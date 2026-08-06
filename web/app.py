@@ -227,6 +227,52 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+#: Paths whose content IS the application: the two HTML entry points (the
+#: dashboard carries its whole script inline) and everything under /static.
+_REVALIDATE_PREFIXES = ("/static/",)
+_REVALIDATE_PATHS = ("/", "/console/")
+
+
+@app.middleware("http")
+async def revalidate_app_assets(request, call_next):
+    """Send ``Cache-Control: no-cache`` for the dashboard's own code.
+
+    Not "do not store" — "ask before using". The response already carries an
+    ETag, so a revalidation is a 304 with no body: the cost is one conditional
+    request per file per page load, against a Pi that answers those from the
+    page cache. Cheap enough that it does not need a TTL to hide behind.
+
+    WHY THIS EXISTS
+    ---------------
+    Without it the origin says nothing about freshness, and both layers above
+    invent an answer. Measured on 2026-08-06 through the public tunnel:
+
+        /static/js/console.js   cf-cache-status: HIT
+                                cache-control:   max-age=14400   (4 h)
+                                last-modified:   7 hours older than the file
+                                                 actually on the Pi
+
+    The `max-age` is not ours — Cloudflare caches .js by extension and adds a
+    browser TTL of its own. The effect is that a deploy does not reach anyone
+    for up to four hours, silently, and the console kiosk that prompted this
+    was still showing seven pages after the eighth had been deployed.
+
+    HTML and JSON are `DYNAMIC` at the edge and carried no header at all, so
+    browsers fell back to heuristic freshness there. index.html is the whole
+    dashboard including its script, so that is the same defect one layer over.
+
+    This is the origin's half. The edge only honours it if the zone's Browser
+    Cache TTL is "Respect Existing Headers" — a fixed value overrides what we
+    send here. Verify at the public URL, not at the Pi:
+
+        curl -sI https://<host>/static/js/console.js | grep -i cache
+    """
+    response = await call_next(request)
+    path = request.url.path
+    if path in _REVALIDATE_PATHS or path.startswith(_REVALIDATE_PREFIXES):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
