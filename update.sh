@@ -76,6 +76,16 @@ rsync -a --delete \
     --exclude='config.toml' \
     ./ "$INSTALL_DIR/"
 
+# Ownership, here and not at the end. rsync runs as root and -a preserves the
+# *source* owner, so every synced file belongs to whoever owns the checkout.
+# When this chown sat after the dependency step, a failed `pip install` aborted
+# the script under `set -e` and left the whole tree owned by the wrong user —
+# and because lgpio creates its notification FIFO in the working directory, the
+# service came up with a lightning thread that could not start, for a reason
+# nothing in the deploy output pointed at (2026-08-06). Doing it first means an
+# abort further down leaves a tree that is at least consistently owned.
+chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
+
 # ---------------------------------------------------------------------------
 # Reinstall Python dependencies if needed
 # ---------------------------------------------------------------------------
@@ -83,32 +93,63 @@ rsync -a --delete \
 if $REINSTALL; then
     echo "Reinstalling Python dependencies …"
     "$INSTALL_DIR/.venv/bin/pip" install --quiet --upgrade pip
-    EXTRAS=web
-    # The AS3935 needs rpi-lgpio, which is Pi-only and therefore not in [web].
-    # Keyed off the installed config, not off a flag: an installation that has
-    # the sensor configured is exactly the one that needs the dependency, and
-    # nothing here can then fall out of step with what the service will start.
-    if grep -qE '^\s*\[lightning\]' "$INSTALL_DIR/config.toml" 2>/dev/null; then
-        EXTRAS="web,lightning"
-        echo "  [lightning] found in config.toml — installing GPIO support too"
-    fi
-    "$INSTALL_DIR/.venv/bin/pip" install --quiet -e "$INSTALL_DIR/[$EXTRAS]"
+    "$INSTALL_DIR/.venv/bin/pip" install --quiet -e "$INSTALL_DIR/[web]"
 fi
 
-# Group membership, not a dependency — but the same failure looks identical.
-# Installations deployed before the AS3935 existed have a service user without
-# the 'gpio' group, and /dev/gpiochip* is root:gpio mode 660: the lightning
-# thread would die at GPIO.setup() while everything else came up fine. The
-# service is restarted below, which is when systemd re-reads the group list.
-if ! id -nG "$SERVICE_USER" | tr ' ' '\n' | grep -qx gpio; then
-    echo "Adding '$SERVICE_USER' to the 'gpio' group (AS3935 interrupt line) …"
-    usermod -aG gpio "$SERVICE_USER"
+# ---------------------------------------------------------------------------
+# AS3935 lightning sensor — only when the installed config asks for it
+# ---------------------------------------------------------------------------
+#
+# Keyed off the installed config rather than a flag: the installation that has
+# the sensor configured is exactly the one that needs this, so the two cannot
+# fall out of step with what the service will actually start.
+if grep -qE '^\s*\[lightning\]' "$INSTALL_DIR/config.toml" 2>/dev/null; then
+    echo "[lightning] found in config.toml — checking GPIO support …"
+
+    # The shim comes from apt, not pip. Raspberry Pi OS ships python3-rpi-lgpio
+    # and python3-lgpio prebuilt; pip would rebuild the same C extension from
+    # source and needs swig, which a weather-station Pi has no reason to carry.
+    # Installing here is not this script's business — it says what is missing.
+    if ! python3 -c 'import RPi.GPIO' 2>/dev/null; then
+        echo "ERROR: the AS3935 needs the RPi.GPIO shim, which is not installed." >&2
+        echo "       sudo apt install python3-rpi-lgpio" >&2
+        echo "       (do NOT install RPi.GPIO or pip-install rpi-lgpio alongside it)" >&2
+        exit 1
+    fi
+
+    # The venv is isolated, so it cannot see those system packages. This .pth
+    # appends the system directory to sys.path — the same thing
+    # `--system-site-packages` does, without recreating the venv. Appended, so
+    # the venv's own packages keep precedence; verified on 2026-08-06 with
+    # smbus2, which exists in both and resolves to the venv copy.
+    SITE_PACKAGES=$("$INSTALL_DIR/.venv/bin/python" -c 'import site; print(site.getsitepackages()[0])')
+    printf '%s\n' /usr/lib/python3/dist-packages > "$SITE_PACKAGES/zz-system-gpio.pth"
+    chown "$SERVICE_USER:$SERVICE_USER" "$SITE_PACKAGES/zz-system-gpio.pth"
+
+    if ! "$INSTALL_DIR/.venv/bin/python" -c 'import RPi.GPIO' 2>/dev/null; then
+        echo "ERROR: the venv still cannot import RPi.GPIO after linking the" >&2
+        echo "       system packages. Do the venv and /usr/bin/python3 have the" >&2
+        echo "       same Python version?" >&2
+        exit 1
+    fi
+    echo "  GPIO support OK (system packages visible to the venv)"
+
+    # /dev/gpiochip* is root:gpio mode 660. Without the group the lightning
+    # thread dies at GPIO.setup() while everything else comes up fine. The
+    # restart below is when systemd re-reads the group list.
+    if ! id -nG "$SERVICE_USER" | tr ' ' '\n' | grep -qx gpio; then
+        echo "  Adding '$SERVICE_USER' to the 'gpio' group …"
+        usermod -aG gpio "$SERVICE_USER"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
 # Ownership & service restart
 # ---------------------------------------------------------------------------
 
+# Second pass, deliberately. The first one above runs right after the sync so
+# an abort cannot leave a half-owned tree; this one picks up what pip wrote
+# into .venv afterwards, which the sync never touches.
 chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
 
 # Before the restart, not after — a restart with a stale unit would run the old

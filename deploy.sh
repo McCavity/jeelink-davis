@@ -62,6 +62,10 @@ usermod -aG i2c     "$SERVICE_USER"   # BME280 I²C access
 # rest of the service comes up normally — a failure that is invisible on the
 # dashboard. Granted unconditionally: the group costs nothing on an
 # installation without the sensor, and adding it later needs a restart.
+#
+# The GPIO *library* is not installed here — it comes from apt, and only if the
+# sensor is actually present. See "Lightning sensor" in README.md; update.sh
+# links the system packages into the venv once config.toml asks for it.
 usermod -aG gpio    "$SERVICE_USER"
 
 # ---------------------------------------------------------------------------

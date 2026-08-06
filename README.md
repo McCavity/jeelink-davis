@@ -192,13 +192,22 @@ source .venv/bin/activate
 pip install -e .              # library only
 pip install -e ".[web]"       # library + web dashboard dependencies (includes smbus2, RPi.bme280)
 pip install -e ".[dev]"       # library + test dependencies
-pip install -e ".[lightning]" # AS3935 support — Raspberry Pi only, see below
 ```
 
-`[lightning]` is separate from `[web]` on purpose: it pulls in `rpi-lgpio`,
-which needs the lgpio C library and does not build on a development machine.
-Without it the lightning thread logs a warning at start and exits; nothing else
-is affected.
+The AS3935 needs the `RPi.GPIO` shim, and that one does **not** come from pip:
+
+```bash
+sudo apt install python3-rpi-lgpio
+```
+
+Raspberry Pi OS ships it prebuilt (together with `python3-lgpio` and
+`liblgpio1`). `pip install rpi-lgpio` would rebuild the same C extension from
+source against the same system library and needs `swig` plus a toolchain — it
+fails on a plain weather-station Pi with `error: command 'swig' failed`.
+`update.sh` points the venv at the system packages once `config.toml` has a
+`[lightning]` section; it installs nothing itself and stops with the apt command
+above if the shim is missing. Without any of this the lightning thread logs a
+warning at start and exits, and nothing else is affected.
 
 ## Configuration
 
@@ -299,13 +308,22 @@ the file sync covers. Before 2026-08-06 it was skipped entirely, so a changed
 unit was copied into `/opt` as an inert file while the running unit kept its old
 content: a deploy that reported success and changed nothing.
 
-If `config.toml` has a `[lightning]` section, `update.sh` additionally installs
-the `[lightning]` extra and adds the service user to the `gpio` group.
-`/dev/gpiochip*` is `root:gpio` mode 660, so without that group the lightning
-thread dies at `GPIO.setup()` while the rest of the service starts normally —
-a failure that is invisible from the dashboard. Both steps are keyed off the
-installed config rather than a flag, so they cannot fall out of step with what
-the service will actually start.
+If `config.toml` has a `[lightning]` section, `update.sh` additionally makes the
+system GPIO packages visible to the venv (a `.pth` file — the same thing
+`--system-site-packages` does, without recreating the venv) and adds the service
+user to the `gpio` group. `/dev/gpiochip*` is `root:gpio` mode 660, so without
+that group the lightning thread dies at `GPIO.setup()` while the rest of the
+service starts normally — a failure that is invisible from the dashboard. Both
+steps are keyed off the installed config rather than a flag, so they cannot fall
+out of step with what the service will actually start.
+
+`update.sh` also chowns the tree to the service user **immediately after the
+file sync**, not only at the end. `rsync -a` runs as root and preserves the
+source owner, so an abort in the dependency step used to leave the whole
+installation owned by whoever owns the checkout — and since lgpio creates its
+notification FIFO in the working directory, the service then came up with a
+lightning thread that could not start, for a reason nothing in the deploy output
+mentioned.
 
 **Service management:**
 

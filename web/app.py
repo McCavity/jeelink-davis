@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import threading
 import time
@@ -115,8 +116,32 @@ def _cacheable(data, max_age: int) -> JSONResponse:
     )
 
 
+def _configure_logging() -> None:
+    """Make the background threads' INFO lines reach the journal.
+
+    uvicorn configures its own loggers and leaves the root logger alone, so a
+    `logging.getLogger(__name__)` in this package lands on the last-resort
+    handler: WARNING and above go to stderr, INFO is dropped entirely.
+
+    That was silently the case for every reader thread since the beginning, and
+    it cost a deploy on 2026-08-06: the AS3935 reader reads its settings back
+    off the chip and logs them, and that line is the only evidence the sensor
+    is listening at the sensitivity it was calibrated at. It never appeared —
+    which left "no error in the log" as the only thing to go on, and an absent
+    error proves nothing when the channel itself is mute.
+    """
+    log = logging.getLogger("web")
+    if not log.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s:     %(message)s"))
+        log.addHandler(handler)
+        log.propagate = False          # otherwise every line appears twice
+    log.setLevel(logging.INFO)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _configure_logging()
     # Initialise database before the reader thread starts
     from . import db as weather_db
     cfg = load_config()
@@ -176,8 +201,7 @@ async def lifespan(app: FastAPI):
             )
             idb_t.start()
         else:
-            import logging as _log
-            _log.getLogger(__name__).warning(
+            logging.getLogger(__name__).warning(
                 "InfluxDB config found but no token — set INFLUXDB_TOKEN env var"
             )
 

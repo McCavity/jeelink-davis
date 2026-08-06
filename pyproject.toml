@@ -27,16 +27,22 @@ web = [
     "influxdb-client>=1.40",
     "paho-mqtt>=2.0",
 ]
-# Raspberry Pi only, and deliberately not part of [web]: rpi-lgpio pulls in the
-# lgpio C library, which does not build on a development machine — putting it
-# in [web] would break `pip install -e ".[dev,web]"` everywhere but the Pi.
+# There is deliberately NO [lightning] extra.
 #
-# rpi-lgpio is the *shim*, not RPi.GPIO. It provides the same `RPi.GPIO` module
-# name on kernels that no longer offer the sysfs GPIO interface. Installing the
-# real RPi.GPIO alongside it gives two packages claiming one import name.
-lightning = [
-    "rpi-lgpio>=0.6",
-]
+# The AS3935 needs the RPi.GPIO shim (rpi-lgpio) on top of the lgpio C library.
+# Raspberry Pi OS ships both prebuilt as python3-rpi-lgpio and python3-lgpio,
+# and taking them from apt is the right source: pip would rebuild the same C
+# extension from source against the same liblgpio1, which needs swig and a
+# toolchain that is not on a weather-station Pi. Tried on 2026-08-06 and it
+# failed exactly there — `error: command 'swig' failed`.
+#
+# So the dependency is satisfied by apt, and update.sh points the venv at the
+# system packages instead of installing anything. See "Lightning sensor" in
+# README.md.
+#
+# rpi-lgpio is the *shim*, not RPi.GPIO. It provides the same `RPi.GPIO` import
+# name on kernels without the sysfs GPIO interface; installing the real
+# RPi.GPIO alongside it gives two packages claiming one name.
 
 [tool.pytest.ini_options]
 # The cache tests are async; without this they are silently skipped as
