@@ -6,7 +6,8 @@
 #
 # What it does:
 #   - Creates a dedicated 'davis' system user/group
-#   - Adds the user to 'dialout' (JeeLink USB serial) and 'i2c' (BME280) groups
+#   - Adds the user to 'dialout' (JeeLink USB serial), 'i2c' (BME280) and
+#     'gpio' (AS3935 interrupt line) groups
 #   - Copies the project to /opt/jeelink-davis/
 #   - Creates a venv and installs all web dependencies
 #   - Installs and enables the davis-weather systemd service
@@ -53,9 +54,15 @@ if ! id "$SERVICE_USER" > /dev/null 2>&1; then
             "$SERVICE_USER"
 fi
 
-echo "Adding '$SERVICE_USER' to hardware groups (dialout, i2c) …"
+echo "Adding '$SERVICE_USER' to hardware groups (dialout, i2c, gpio) …"
 usermod -aG dialout "$SERVICE_USER"   # JeeLink USB serial access
 usermod -aG i2c     "$SERVICE_USER"   # BME280 I²C access
+# AS3935 interrupt line. /dev/gpiochip* is root:gpio mode 660, so without this
+# the lightning thread dies at GPIO.setup() with a permission error while the
+# rest of the service comes up normally — a failure that is invisible on the
+# dashboard. Granted unconditionally: the group costs nothing on an
+# installation without the sensor, and adding it later needs a restart.
+usermod -aG gpio    "$SERVICE_USER"
 
 # ---------------------------------------------------------------------------
 # Install directory

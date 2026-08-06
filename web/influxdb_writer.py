@@ -78,6 +78,11 @@ _OUTDOOR_FIELDS = (
     "rssi", "battery_ok",
 )
 _INDOOR_FIELDS = ("temperature", "humidity", "pressure")
+# distance_km and energy are absent for everything but a strike, so
+# strike_count is what keeps a disturber point from having no field at all —
+# InfluxDB rejects a fieldless point, and the disturber rate is the whole
+# reason the non-strike events are written in the first place.
+_LIGHTNING_FIELDS = ("distance_km", "energy", "strike_count")
 
 
 def _build_point(payload: dict, measurement: str):
@@ -103,7 +108,22 @@ def _build_point(payload: dict, measurement: str):
         # channel bleibt Feld, nicht Tag — als Tag würde es pro Channel-Wert
         # eine separate Zeitreihe erzeugen und Grafana-Queries fragmentieren
 
-    fields = _OUTDOOR_FIELDS if measurement == "outdoor" else _INDOOR_FIELDS
+    if measurement == "lightning":
+        # kind *is* a tag, unlike channel above: it has four possible values
+        # for all time, and separating the series is exactly what one wants —
+        # the disturber rate and the strike rate are different questions.
+        kind = payload.get("kind")
+        if kind is not None:
+            p = p.tag("kind", str(kind))
+
+    # An unknown measurement must not silently fall through to the indoor
+    # field list — it would produce a point with no fields, which the client
+    # rejects at write time, far away from the call that caused it.
+    fields = {
+        "outdoor":   _OUTDOOR_FIELDS,
+        "indoor":    _INDOOR_FIELDS,
+        "lightning": _LIGHTNING_FIELDS,
+    }[measurement]
     for field_name in fields:
         val = payload.get(field_name)
         if val is None:

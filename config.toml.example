@@ -12,6 +12,27 @@ db_path = "data/readings.db"   # relative to project root, or absolute path
 bme280_bus     = 1     # I²C bus number (1 on all modern Raspberry Pi models)
 bme280_address = 0x76  # I²C address: 0x76 (SDO low) or 0x77 (SDO high)
 
+# AS3935 lightning sensor (optional — remove section to disable)
+#
+# These are NOT defaults you can copy to another board. `capacitance` was
+# measured on this antenna with a scope on the IRQ pin (target 500 kHz / 16 =
+# 31 250 Hz ±3.5 %); `manual_cal()` writes the number it is given and measures
+# nothing. `watchdog` is the lowest threshold that rejects the local interferer
+# while still passing a real stimulus — at the chip default of 2 the neighbouring
+# BME280's 60-second I²C poll was reported as lightning at 8 and 12 km.
+#
+# The reader reads all five back off the chip at start and refuses to run on a
+# mismatch: the settings are volatile, and reset() puts watchdog back to 2.
+# [lightning]
+# address         = 0x03   # I²C address, DIP A0/A1 both high (factory default)
+# bus             = 1
+# irq_pin         = 7      # BOARD numbering — physical pin 7 == GPIO4
+# capacitance     = 96     # pF, measured; must be a multiple of 8
+# watchdog        = 6      # measured; chip default 2 is too sensitive here
+# spike_rejection = 2      # chip default
+# noise_floor     = 2      # chip default
+# indoor          = true   # indoor gain; outdoor lowers it by ~14 dB
+
 # InfluxDB v2 export (optional — remove section to disable)
 # Token: set via INFLUXDB_TOKEN env var (preferred) or token key below.
 # [influxdb]

@@ -21,7 +21,21 @@ Topic layout: ``davis/<source>/<field>``, all retained, QoS 1.
   davis/indoor/humidity         %      BME280
   davis/indoor/pressure         hPa    BME280
 
-  davis/lightning/…                    AS3935 — reserved, not published yet
+  davis/lightning/distance_km   km     AS3935, last strike (see below)
+  davis/lightning/energy        —      AS3935, unitless, no documented scale
+  davis/lightning/strike_count  count  strikes so far today (local day)
+
+WHY ONLY STRIKES REACH THE LIGHTNING TOPICS
+-------------------------------------------
+The AS3935 also fires on disturbers and noise, and those are stored — they are
+the record of how quiet the corner is. They are not published: a disturber
+carries no distance and no energy, so publishing one would leave the *previous*
+strike's retained values standing under a fresh event. Consumers would see a
+distance that belongs to a different hour.
+
+For the same reason ``distance_km`` is retractable. The sensor's own
+out-of-range code (63 km) is rejected by the plausibility gate, and a strike
+whose distance was rejected must not inherit the last one that passed.
 
 WHY THE SOURCE IS PART OF THE TOPIC
 -----------------------------------
@@ -94,10 +108,20 @@ SOURCE_FIELDS: dict[str, tuple[str, ...]] = {
     "lightning": ("distance_km", "energy", "strike_count"),
 }
 
-#: Fields that are derived rather than measured. Only these may be retracted:
-#: a missing *raw* field just means "not in this packet" (the ISS rotates
-#: through field types), which is normal and must not delete anything.
+#: Fields that are derived rather than measured.
 DERIVED_FIELDS: frozenset[str] = frozenset({"feels_like"})
+
+#: Fields whose absence is *information* and must therefore delete the retained
+#: value. Everything else keeps its last value when a payload does not carry
+#: it: a missing raw Davis field just means "not in this packet" (the ISS
+#: rotates through field types), which is normal and must not delete anything.
+#:
+#: ``feels_like``  — derived; when an input goes stale the value stops being
+#:                   true, and it once stood unchanged for 103 days.
+#: ``distance_km`` — belongs to one strike. A strike whose distance failed the
+#:                   plausibility gate would otherwise be published carrying
+#:                   the distance of an earlier one.
+RETRACTABLE_FIELDS: frozenset[str] = DERIVED_FIELDS | frozenset({"distance_km"})
 
 #: How long an input may be reused for a derived value.
 FRESHNESS_S = 600
@@ -287,15 +311,15 @@ def _publish_reading(client: Any, source: str, payload: dict,
             body = str(values[field])
             client.publish(topic, payload=body, qos=1, retain=True)
             _last_payload[topic] = body
-        elif field in DERIVED_FIELDS and _last_payload.get(topic):
-            # Inputs went stale. Retract the retained value rather than let it
-            # stand; an empty retained payload deletes it at the broker.
+        elif field in RETRACTABLE_FIELDS and _last_payload.get(topic):
+            # The value can no longer be stated. Retract the retained one
+            # rather than let it stand; an empty retained payload deletes it
+            # at the broker.
             client.publish(topic, payload="", qos=1, retain=True)
             _last_payload[topic] = ""
-            logger.warning(
-                "MQTT %s: inputs older than %d s — retained value retracted",
-                topic, FRESHNESS_S,
-            )
+            grund = (f"inputs older than {FRESHNESS_S} s"
+                     if field in DERIVED_FIELDS else "not carried by this event")
+            logger.warning("MQTT %s: %s — retained value retracted", topic, grund)
 
 
 def _compute_rain_rate(rain_secs: float | None) -> float | None:

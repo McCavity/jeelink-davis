@@ -34,6 +34,7 @@ from fastapi.staticfiles import StaticFiles
 from .broadcaster import broadcaster
 from .bme280_reader import bme280_reader_thread
 from .config import load_config
+from .lightning_reader import lightning_reader_thread
 from .reader import station_reader_thread
 from . import influxdb_writer, mqtt_publisher
 
@@ -144,6 +145,19 @@ async def lifespan(app: FastAPI):
         name="bme280-reader",
     )
     bme_t.start()
+
+    # No [lightning] section means no sensor — like [influxdb] and [mqtt].
+    # The thread is not started rather than started and disabled, so an
+    # installation without the hardware logs nothing about it at all.
+    lightning_cfg = cfg.get("lightning")
+    if lightning_cfg:
+        lightning_t = threading.Thread(
+            target=lightning_reader_thread,
+            args=(lightning_cfg,),
+            daemon=True,
+            name="lightning-reader",
+        )
+        lightning_t.start()
 
     idb_cfg = cfg.get("influxdb")
     if idb_cfg:
@@ -360,6 +374,35 @@ async def indoor():
     loop = asyncio.get_running_loop()
     trend = await loop.run_in_executor(None, weather_db.query_pressure_trend)
     return {**data, "pressure_trend": trend}
+
+
+@app.get("/api/lightning")
+async def lightning():
+    """AS3935 status: last strike, last event of any kind, today's counts.
+
+    ``last_event`` is not decoration. A silent lightning sensor and a
+    disconnected IRQ wire produce exactly the same empty log, and this endpoint
+    is the only place that tells them apart: the disturber events keep arriving
+    when the chain works, so a recent event of *any* kind is the proof that
+    "no lightning" means the sky and not the wiring.
+
+    Answers 204 while the table is empty, matching /api/indoor.
+    """
+    from . import db as weather_db
+
+    loop = asyncio.get_running_loop()
+
+    def _collect() -> dict:
+        return {
+            "last_strike": weather_db.query_lightning_last("lightning"),
+            "last_event":  weather_db.query_lightning_last(),
+            "today":       weather_db.query_lightning_today(),
+        }
+
+    data = await loop.run_in_executor(None, _collect)
+    if data["last_event"] is None:
+        return Response(status_code=204)
+    return data
 
 
 @app.get("/api/rain/totals")

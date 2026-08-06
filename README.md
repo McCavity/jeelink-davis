@@ -71,6 +71,7 @@ flowchart LR
         SVC["davis-weather\nservice\n(FastAPI)"]
         DB[("SQLite\nreadings.db")]
         BME["GY-BME280\n(I²C indoor sensor)"]
+        AS["AS3935\n(I²C lightning sensor)"]
     end
 
     subgraph Optional integrations
@@ -85,6 +86,7 @@ flowchart LR
     ISS -- "RF 868 MHz" --> JL
     JL -- "USB serial" --> SVC
     BME -- "I²C" --> SVC
+    AS -- "I²C + IRQ (GPIO4)" --> SVC
     SVC -- "store" --> DB
     DB -- "query" --> SVC
     SVC -- "SSE / REST" --> Browser
@@ -98,6 +100,41 @@ flowchart LR
 
 A GY-BME280 connected to the Raspberry Pi I²C bus provides barometric pressure, indoor temperature, and indoor humidity. The I²C address and bus number are configured in `config.toml` (defaults: bus `1`, address `0x76`). It is polled every 60 s by a background thread and stored in a separate `indoor_readings` SQLite table. Pressure trend compares the average of the last 30 min against the average of the 2–4 h ago window — effectively a 3-hour rolling comparison (±0.5 hPa threshold → rising / falling / steady).
 
+### Lightning sensor (AS3935)
+
+A DFRobot AS3935 franklin lightning sensor on the same I²C bus, with its
+interrupt line on physical pin 7 (GPIO4). Unlike the BME280 it is not polled:
+every interrupt is read in a short callback and handed to a worker thread,
+which writes it to the `lightning_events` table, InfluxDB, and — for strikes
+only — MQTT. Optional; without a `[lightning]` section in `config.toml` the
+thread is never started.
+
+Every event is stored, not just the strikes. The disturber and noise counts are
+the record of how quiet the corner is, and a later "is it noisier now?" has
+nothing to compare against without them. They are also what tells a quiet sky
+apart from a disconnected IRQ wire, which is why `/api/lightning` reports the
+last event of *any* kind next to the last strike.
+
+**The settings are volatile and `reset()` wipes them.** The watchdog threshold
+returns to its power-up value of 2 on every reset and a reboot loses everything,
+so the reader applies the configured values at start and then reads them back
+off the chip — on a mismatch it refuses to run rather than listen at an unknown
+sensitivity. This is not theoretical: at the default threshold, the neighbouring
+BME280's own 60-second I²C poll was reported as lightning at 8 km and at 12 km.
+The values in `config.toml.example` were measured on this unit (antenna
+capacitance with an oscilloscope on the IRQ pin in LCO mode, watchdog threshold
+against a stimulus with a control burst between every step) and are not
+transferable to another board.
+
+> **No alarm is built on this sensor, deliberately.** As of 2026-08-06 it has
+> only ever reacted to interference and to a piezo spark a few centimetres
+> away; neither its distance nor its energy figure has been compared against a
+> real thunderstorm. There is therefore no header warning, no beacon and no
+> threshold logic — the dashboard tile displays and nothing more. An alarm on
+> an unvalidated sensor produces the worst kind of artefact: the false 8-km
+> events came with a distance too, and on a dashboard they would have looked
+> like a storm approaching.
+
 ### Plausibility gate
 
 Both reader threads check every value against the manufacturer's range before
@@ -107,7 +144,7 @@ product specification and the Davis 6450/6490 sensor spec sheets for the
 outdoor one. Fields with no published range — `rssi`, `voltage_solar`,
 `voltage_capacitor`, `rain_secs` — are deliberately left unchecked.
 
-The two sensors are treated differently because they fail differently:
+The three sensors are treated differently because they fail differently:
 
 - **BME280** — one implausible value discards the whole sample. Its three
   values come from a single measurement over a single I²C transaction, and the
@@ -120,6 +157,13 @@ The two sensors are treated differently because they fail differently:
   packet", the payload additionally carries `rejected_fields` — `{field: value}`,
   empty when nothing was rejected — so a consumer can tell a rejection from an
   omission.
+- **AS3935** — the offending field is discarded, the event never is. Here the
+  event *is* the measurement: that the sensor fired is a fact independent of
+  the distance register, and 63 in that register is the chip's documented way
+  of saying "further than I can estimate". Dropping the event would delete a
+  detection in order to reject a number. `distance_km` is bounded to 1–40 km
+  (datasheet DS000385, Table 17); `energy` is left unchecked, being explicitly
+  a unitless number with no documented scale.
 
 Discards are counted and served under `plausibility` by `/api/system`, and
 shown on the console's system page. A rejection that only reached the log would
@@ -138,6 +182,7 @@ verified.
 - JeeLink USB receiver with Davis firmware 0.8e
 - Davis Vantage Pro 2 ISS (outdoor sensor unit)
 - *(optional)* GY-BME280 on I²C (address and bus configurable in `config.toml`) for pressure and indoor climate
+- *(optional)* DFRobot AS3935 on I²C with its IRQ on physical pin 7 (GPIO4), powered from **3.3 V** — the IRQ line swings to VCC level, so 5 V would put 5 V on a GPIO input. Needs `rpi-lgpio` on Debian 13; do **not** install `RPi.GPIO` alongside it
 
 ## Installation
 
@@ -147,11 +192,17 @@ source .venv/bin/activate
 pip install -e .              # library only
 pip install -e ".[web]"       # library + web dashboard dependencies (includes smbus2, RPi.bme280)
 pip install -e ".[dev]"       # library + test dependencies
+pip install -e ".[lightning]" # AS3935 support — Raspberry Pi only, see below
 ```
+
+`[lightning]` is separate from `[web]` on purpose: it pulls in `rpi-lgpio`,
+which needs the lgpio C library and does not build on a development machine.
+Without it the lightning thread logs a warning at start and exits; nothing else
+is affected.
 
 ## Configuration
 
-A vanilla `config.toml.example` is already in the project root — copy it to `config.toml` and edit that copy to match your location and hardware before running the web service. Note that both the `[influxdb]` and `[mqtt]` sections are optional. If you'd like to use either of them or both just uncomment what you need and edit the settings according to your environment:
+A vanilla `config.toml.example` is already in the project root — copy it to `config.toml` and edit that copy to match your location and hardware before running the web service. Note that the `[influxdb]`, `[mqtt]` and `[lightning]` sections are optional. If you'd like to use any of them just uncomment what you need and edit the settings according to your environment:
 
 ```toml
 [station]
@@ -167,6 +218,19 @@ db_path = "data/readings.db"   # relative to project root, or absolute path
 [sensors]
 bme280_bus     = 1     # I²C bus number (1 on all modern Raspberry Pi models)
 bme280_address = 0x76  # I²C address: 0x76 (SDO low) or 0x77 (SDO high)
+
+# AS3935 lightning sensor (optional — remove section to disable)
+# These values are MEASURED on one specific board, not defaults. See the
+# lightning section above before copying them to another unit.
+# [lightning]
+# address         = 0x03   # I²C address, DIP A0/A1 both high (factory default)
+# bus             = 1
+# irq_pin         = 7      # BOARD numbering — physical pin 7 == GPIO4
+# capacitance     = 96     # pF, measured; must be a multiple of 8
+# watchdog        = 6      # measured; chip default 2 is too sensitive here
+# spike_rejection = 2      # chip default
+# noise_floor     = 2      # chip default
+# indoor          = true   # indoor gain; outdoor lowers it by ~14 dB
 
 # InfluxDB v2 export (optional — remove section to disable)
 # Token: set via INFLUXDB_TOKEN env var (preferred) or token key below.
@@ -234,6 +298,14 @@ unit changed** — the unit lives in `/etc/systemd/system/`, outside the directo
 the file sync covers. Before 2026-08-06 it was skipped entirely, so a changed
 unit was copied into `/opt` as an inert file while the running unit kept its old
 content: a deploy that reported success and changed nothing.
+
+If `config.toml` has a `[lightning]` section, `update.sh` additionally installs
+the `[lightning]` extra and adds the service user to the `gpio` group.
+`/dev/gpiochip*` is `root:gpio` mode 660, so without that group the lightning
+thread dies at `GPIO.setup()` while the rest of the service starts normally —
+a failure that is invisible from the dashboard. Both steps are keyed off the
+installed config rather than a flag, so they cannot fall out of step with what
+the service will actually start.
 
 **Service management:**
 

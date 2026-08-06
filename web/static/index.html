@@ -315,6 +315,25 @@
       </div>
     </div>
 
+    <!-- Lightning (AS3935) — hidden until the sensor has ever reported -->
+    <div id="lightning-card" class="card" style="display:none">
+      <div data-i18n="cards.lightning" class="card-label">Lightning</div>
+      <div class="flex items-baseline gap-2">
+        <div id="lightning-dist-val" class="value-medium text-amber-300">—</div>
+        <span class="text-slate-500 text-sm">km</span>
+      </div>
+      <div class="text-slate-500 text-sm mt-1">
+        <span data-i18n="cards.lightning_today">Strikes today</span>
+        <span id="lightning-count-val" class="mono text-slate-300">0</span>
+      </div>
+      <!-- The liveness line, not a detail: an empty log looks the same whether
+           the sky is quiet or the IRQ wire is off. -->
+      <div class="text-xs text-slate-600 mt-2">
+        <span data-i18n="cards.lightning_last_event">Last signal</span>
+        <span id="lightning-seen-val" class="mono">—</span>
+      </div>
+    </div>
+
   </div>
 
   <!-- ── Charts ───────────────────────────────────────────────────────── -->
@@ -1497,6 +1516,40 @@ async function loadIndoor() {
   } catch (_) {}
 }
 
+// ── Lightning sensor (AS3935) ─────────────────────────────────────────────
+//
+// Deliberately no warning, no colour change, no beacon. This sensor has never
+// been checked against a real thunderstorm — everything it has reacted to so
+// far is interference or a spark a few centimetres away — and a dashboard
+// alarm built on that would be the worst possible artefact: authoritative
+// looking and unverified. The false "lightning at 8 km" events came with a
+// distance too. Display only, until a real storm has been recorded.
+
+// The API returns UTC as 'YYYY-MM-DD HH:MM:SS'. Without the explicit Z most
+// browsers read that as *local* time, which in summer makes every event look
+// two hours old.
+function parseUtc(ts) {
+  return ts ? new Date(ts.replace(' ', 'T') + 'Z') : null;
+}
+
+async function loadLightning() {
+  try {
+    const res = await fetch('/api/lightning');
+    if (res.status === 204) return;   // sensor configured but nothing seen yet
+    if (!res.ok) return;
+    const d = await res.json();
+
+    const card = document.getElementById('lightning-card');
+    if (card) card.style.display = '';
+
+    setText('lightning-dist-val', d.last_strike ? fmt(d.last_strike.distance_km, 0) : '—');
+    setText('lightning-count-val', d.today?.lightning ?? 0);
+
+    const seen = parseUtc(d.last_event?.timestamp);
+    setText('lightning-seen-val', seen ? humanElapsed(Date.now() - seen.getTime()) : '—');
+  } catch (_) {}
+}
+
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 async function loadLatest() {
   try {
@@ -1530,6 +1583,7 @@ function connectSSE() {
   loadSolar();                 // also populates sun elevation curve
   loadForecast();
   loadIndoor();                // BME280 pressure + indoor temp/humidity
+  loadLightning();             // AS3935 — display only, see loadLightning()
   setHistPeriod('1D');         // seed history section; sets dates then calls loadHistory()
   loadRainTotals();
   connectSSE();
@@ -1773,6 +1827,7 @@ setInterval(loadForecast,    30 * 60 * 1000);
 setInterval(loadTodayStats,  60 * 1000);
 setInterval(loadDayTemp,      5 * 60 * 1000);
 setInterval(loadIndoor,      60 * 1000);
+setInterval(loadLightning,   60 * 1000);
 setInterval(loadRainTotals,  60 * 60 * 1000);
 </script>
 </body>

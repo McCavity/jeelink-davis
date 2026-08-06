@@ -81,10 +81,14 @@ web/
 ├── broadcaster.py    # fan-out to SSE clients; maintains merged latest-reading state
 ├── config.py         # loads config.toml
 ├── db.py             # SQLite storage layer (WAL mode, per-thread connections)
-│                     #   tables: readings (outdoor), indoor_readings (BME280)
+│                     #   tables: readings (outdoor), indoor_readings (BME280),
+│                     #           lightning_events (AS3935)
+├── lightning_reader.py # daemon threads: AS3935 IRQ callback + event worker
 ├── plausibility.py   # range gate in front of all three stores + discard counter
 │                     #   bounds are the manufacturer's, cited per line
 ├── reader.py         # daemon thread: drives DavisStation → broadcaster + DB
+├── vendor/           # third-party code kept in-tree with its required patches
+│   └── DFRobot_AS3935_Lib.py   # DFRobot, MIT; smbus2 + explicit read length
 └── static/
     ├── index.html    # single-page dashboard (Chart.js, Tailwind CDN, vanilla JS)
     └── i18n/
@@ -109,14 +113,21 @@ tests/
 `bme280_reader_thread` (60 s poll) → `db.insert_indoor_reading()` + in-memory cache
 → `/api/indoor` snapshot (polled by frontend every 60 s)
 
+**Data flow (lightning/AS3935)**:
+GPIO rising edge → short IRQ callback (reads the interrupt source, which is what
+re-arms the line) → bounded queue → `lightning-worker` thread →
+`db.insert_lightning_event()` + InfluxDB + MQTT (strikes only)
+→ `/api/lightning` snapshot (polled by frontend every 60 s)
+
 ## InfluxDB Integration (Phase 3)
 
 InfluxDB v2 export is optional. Configure in `config.toml` under `[influxdb]` and set
 `INFLUXDB_TOKEN` env var (or add `token =` to the section).
 
 **Measurements written:**
-- `outdoor` — all Davis ISS fields; tags: `station_id`, `channel`
+- `outdoor` — all Davis ISS fields; tag: `station_id`
 - `indoor`  — BME280 fields: `temperature`, `humidity`, `pressure`
+- `lightning` — AS3935: `distance_km`, `energy`, `strike_count`; tag: `kind`
 
 **Backfill existing data:**
 ```bash
@@ -142,6 +153,7 @@ Bucket must exist in InfluxDB: `weather` (org name as configured in `config.toml
 | `GET /api/history/recent?n=50` | Last n raw readings (used to seed the wind chart) |
 | `GET /api/history/today` | Today's min/max stats for card display |
 | `GET /api/indoor` | Latest BME280 reading (pressure, indoor temp/humidity) + pressure trend |
+| `GET /api/lightning` | AS3935: last strike, last event of *any* kind, today's counts per kind; 204 while the table is empty |
 | `GET /api/stats/daily\|monthly\|yearly` | Aggregated stats by period |
 | `GET /api/system` | Pi health (temp, load, memory, throttling) + `plausibility` discard counter |
 
@@ -193,4 +205,41 @@ Bucket must exist in InfluxDB: `weather` (org name as configured in `config.toml
 Connected to Raspberry Pi I²C bus 1 at address **0x76**. Polled every 60 s by `web/bme280_reader.py` daemon thread. Readings stored in `indoor_readings` table (SQLite). Timestamps stored as `YYYY-MM-DD HH:MM:SS` UTC so SQLite `datetime()` comparisons work.
 
 **Pressure trend** (`/api/indoor` → `pressure_trend`): compares avg pressure of the last 30 min vs 2–4 h ago. Threshold ±0.5 hPa → `rising` / `falling` / `steady` / `unknown` (insufficient history).
+
+## Lightning sensor (AS3935)
+
+DFRobot AS3935 on I²C bus 1 at **0x03**, IRQ on physical pin 7 (GPIO4), powered
+from **3.3 V** — the IRQ swings to VCC level, so 5 V would drive 5 V into a GPIO
+input. The IRQ lead runs straight to the Pi and not through the I²C hub, which
+carries only VCC/GND/SDA/SCL. Enabled by a `[lightning]` section in
+`config.toml`; without it the thread is never started. Needs the `[lightning]`
+extra (`rpi-lgpio`) **and** the service user in the `gpio` group —
+`/dev/gpiochip*` is `root:gpio` mode 660, so without it the lightning thread
+dies at `GPIO.setup()` while everything else comes up normally. `update.sh`
+installs the extra when it finds the section and adds the group if it is
+missing; the restart afterwards is what makes systemd re-read the group list.
+
+**Calibrated values, measured on this unit 2026-08-06 — do not change without
+measuring again:** 96 pF antenna capacitance (scope on the IRQ pin in LCO mode,
+target 31.25 kHz ±3.5 %, bracketed at 88/96/104 pF), watchdog threshold 6,
+spike rejection 2, noise floor 2, indoor mode.
+
+**Three traps that cost a day:**
+- `reset()` silently returns the watchdog threshold to 2, and the settings do
+  not survive a reboot. The reader therefore applies them at start and **reads
+  them back off the chip**, refusing to run on a mismatch.
+- **I²C traffic on its own bus triggers it.** At the default threshold of 2, the
+  neighbouring BME280's 60-second poll was reported as `lightning` at 8 km and
+  12 km. At 6 that is gone — 45 minutes in an empty room gave 4 events, all
+  `unknown`, zero disturber, zero lightning. That is the reference baseline.
+- **A quiet log and a disconnected IRQ wire look identical.** Never read "no
+  events" as "no lightning" without evidence the chain fires; `/api/lightning`
+  reports the last event of *any* kind for exactly that reason. The piezo test
+  stimulus only works at 3–5 cm — a "failed" test at 20 cm measures the tester.
+
+**Out of scope until a real storm has been recorded:** no header warning, no
+beacon, no threshold logic. Nothing this sensor has reacted to so far has been
+verified against an independent source, and an alarm on an unvalidated sensor
+is the worst artefact — authoritative-looking and wrong. See
+`docs/plans/2026-08-06-as3935-integration.md` §8.
 
