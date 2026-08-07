@@ -277,28 +277,59 @@ spike rejection 2, noise floor 2, indoor mode.
   reports the last event of *any* kind for exactly that reason. The piezo test
   stimulus only works at 3–5 cm — a "failed" test at 20 cm measures the tester.
 
-### Open question: one detection is not one event
+### One detection is not one event
 
-**Do not build anything on the event count.** Measured 2026-08-06 with single
-piezo clicks, one stimulus each:
+**Do not build anything on the event count.** That much is settled; what
+follows is *why*, because the first explanation was wrong.
+
+Measured 2026-08-06, single piezo clicks, **one stimulus per setting**:
 
 | vendor sleep | handler period | events | burst |
 |---|---|---|---|
 | 30 ms | 36.3 ms | 28 | 972 ms |
 | 5 ms | 12.2 ms | 11 | 249 ms |
 
-The event spacing tracks the IRQ handler's own period to the millisecond, in
-both runs — so the counter is paced by this loop, not by the sensor. The count
-also does not scale the way a fixed-duration signal sampled faster would, which
-rules out the obvious explanation. The unverified hypothesis is that the
-handler's own I²C reads sustain the disturbance (this sensor fires on I²C
-traffic on its own bus — §4 of the integration plan).
+That was read as "a slower handler yields more events". Measured 2026-08-07,
+**five clicks at an unchanged 5 ms handler**, to establish what a single
+setting even scatters by:
 
-Consequences until that is measured: a burst count is not a measure of physical
-activity, and the quiet-room baseline in the plan should be read as isolated
-events only. `unknown` is the interrupt register reporting no valid bit — a
-failed read, not a detection — and storing them as events inflates every total.
-Whether they belong in the table at all is part of the same open question.
+| click | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| events | 16 | 13 | 12 | **28** | 23 |
+| spacing SD | 24.12 | 27.58 | **0.02** | 27.32 | 36.29 |
+
+One setting produces 12 to 28. **The 28-versus-11 difference was the scatter
+between two thumbs on a piezo, not an effect of the handler** — two runs of
+n=1 cannot separate the two, and were read as though they could.
+
+What survives, and it is the useful part: the handler puts a **floor** under
+the spacing, not a beat. The minimum gap is 10.71–10.77 ms in all five bursts
+(5 ms sleep plus ~5.75 ms of I²C), while the outliers reach 185 ms. Click 3
+looked like a metronome (SD 0.02 ms) only because it happened to sit on the
+floor throughout — and a burst of exactly that shape was the 2026-08-06
+measurement. Edges arriving while the callback runs are lost (see the
+`lightning_reader` docstring), so:
+
+- **Any rate computed *within* a burst is an artefact of this loop.**
+- **The count comes from the stimulus**, but is undercounted, and by how much
+  depends on the handler speed. This rig cannot measure that: the scatter
+  between stimuli is larger than the effect being looked for.
+
+Still open, and not answered by the above: why the chain sustains itself at
+all. The unverified hypothesis remains that the handler's own I²C reads keep
+the disturbance alive (this sensor fires on I²C traffic on its own bus — §4 of
+the integration plan).
+
+Two further observations from the 2026-08-07 run, neither of them sought:
+**classification is not stable** — 2 of 5 clicks came through as `lightning`
+where 7 of 7 did on 2026-08-06 — and both of those again reported a distance
+(10 km, 8 km) for a spark a few centimetres away.
+
+Consequences: a burst count is not a measure of physical activity, and the
+quiet-room baseline in the plan should be read as isolated events only.
+`unknown` is the interrupt register reporting no valid bit — a failed read, not
+a detection — and storing them as events inflates every total. Whether they
+belong in the table at all is still open.
 
 **Out of scope until a real storm has been recorded:** no header warning, no
 beacon, no threshold logic. Nothing this sensor has reacted to so far has been

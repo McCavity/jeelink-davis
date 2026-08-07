@@ -94,35 +94,6 @@ const PAGES = [
             '', { style: 'flex:1' })}
         </div>`;
     } },
-  { id: 'rain', title: 'Rain', age: 'outdoor', render: (root, s) => {
-      const o = s.outdoor || {}, td = s.today || {}, tot = s.rainTotals || {};
-      // rain_secs is the interval between the last two tips, not the age of
-      // the last tip — the rate must decay off that age (s.lastTipAt), and
-      // "last tip" must show elapsed-since-tip, not that interval.
-      const msSinceTip = s.lastTipAt == null ? null : Date.now() - s.lastTipAt;
-      const rate = rainRate(o.rain_secs, msSinceTip);
-      const since = msSinceTip == null ? '—' : humanElapsed(msSinceTip, tr);
-      root.innerHTML = `
-        <div class="col" style="flex:1">
-          <div class="tile" style="flex:0 0 250px">
-            <div class="lbl">${tr('cards.rain_rate_label', 'Rain rate')}</div>
-            <div class="row" style="margin-top:10px">
-              <span class="huge blue value" style="font-size:150px">${fmt(rate, 1)}<span class="unit">mm/h</span></span>
-              <span style="flex:1"></span>
-              <span style="text-align:right">
-                <span class="lbl">${tr('cards.rain_last_tip', 'Last tip')}</span>
-                <div class="big slate value" style="font-size:64px">${since}</div>
-              </span>
-            </div>
-          </div>
-          <div class="grid4" style="flex:1">
-            ${tile(tr('cards.rain_today_label', 'Today'), `<span class="big blue">${fmt(td.rain_mm, 1)}</span>`, 'mm', { cls: 'ctr' })}
-            ${tile(tr('cards.rain_week', 'Week'),        `<span class="big blue">${fmt(tot.week_mm, 1)}</span>`, 'mm', { cls: 'ctr' })}
-            ${tile(tr('cards.rain_month', 'Month'),      `<span class="big blue">${fmt(tot.month_mm, 1)}</span>`, 'mm', { cls: 'ctr' })}
-            ${tile(tr('cards.rain_year', 'Year'),        `<span class="big blue">${fmt(tot.year_mm, 1)}</span>`, 'mm', { cls: 'ctr' })}
-          </div>
-        </div>`;
-    } },
   { id: 'wind', title: 'Wind', age: 'outdoor', render: (root, s) => {
       const o = s.outdoor || {}, td = s.today || {};
       const mean = meanOver(s.windSamples, 600_000, Date.now());
@@ -165,6 +136,116 @@ const PAGES = [
       root.querySelector('.rose-tile').appendChild(
         buildRose(o.wind_direction, pointerState, LANG, note));
     } },
+  { id: 'rain', title: 'Rain', age: 'outdoor', render: (root, s) => {
+      const o = s.outdoor || {}, td = s.today || {}, tot = s.rainTotals || {};
+      // rain_secs is the interval between the last two tips, not the age of
+      // the last tip — the rate must decay off that age (s.lastTipAt), and
+      // "last tip" must show elapsed-since-tip, not that interval.
+      const msSinceTip = s.lastTipAt == null ? null : Date.now() - s.lastTipAt;
+      const rate = rainRate(o.rain_secs, msSinceTip);
+      const since = msSinceTip == null ? '—' : humanElapsed(msSinceTip, tr);
+      root.innerHTML = `
+        <div class="col" style="flex:1">
+          <div class="tile" style="flex:0 0 250px">
+            <div class="lbl">${tr('cards.rain_rate_label', 'Rain rate')}</div>
+            <div class="row" style="margin-top:10px">
+              <span class="huge blue value" style="font-size:150px">${fmt(rate, 1)}<span class="unit">mm/h</span></span>
+              <span style="flex:1"></span>
+              <span style="text-align:right">
+                <span class="lbl">${tr('cards.rain_last_tip', 'Last tip')}</span>
+                <div class="big slate value" style="font-size:64px">${since}</div>
+              </span>
+            </div>
+          </div>
+          <div class="grid4" style="flex:1">
+            ${tile(tr('cards.rain_today_label', 'Today'), `<span class="big blue">${fmt(td.rain_mm, 1)}</span>`, 'mm', { cls: 'ctr' })}
+            ${tile(tr('cards.rain_week', 'Week'),        `<span class="big blue">${fmt(tot.week_mm, 1)}</span>`, 'mm', { cls: 'ctr' })}
+            ${tile(tr('cards.rain_month', 'Month'),      `<span class="big blue">${fmt(tot.month_mm, 1)}</span>`, 'mm', { cls: 'ctr' })}
+            ${tile(tr('cards.rain_year', 'Year'),        `<span class="big blue">${fmt(tot.year_mm, 1)}</span>`, 'mm', { cls: 'ctr' })}
+          </div>
+        </div>`;
+    } },
+  { id: 'lightning', title: 'Lightning', age: null, render: (root, s) => {
+      const l = s.lightning || {};
+      const strike = l.last_strike, ereignis = l.last_event, heute = l.today || {};
+      const seenMs = parseTimestampMs(ereignis && ereignis.timestamp);
+      const seen = seenMs == null ? '—' : humanElapsed(Date.now() - seenMs, tr);
+      const pos = distanceScalePercent(strike && strike.distance_km);
+      const zeilen = KACHELMANN_KA.map(k =>
+        `<tr><td>${k.range}</td><td>${tr('console.ka_' + k.id, k.en)}</td></tr>`).join('');
+      root.innerHTML = `
+        <div class="col" style="flex:1">
+          <div class="tile" style="flex:1">
+            <div class="lbl">${tr('console.last_strike', 'Last strike')}</div>
+            <div class="huge amber value" style="font-size:172px;margin-top:10px">${
+              strike ? fmt(strike.distance_km, 0) : '—'}<span class="unit">km</span></div>
+            <div class="sub-d value">${strike
+              ? `${timeOf(new Date(parseTimestampMs(strike.timestamp)).toISOString(), LOCALE)}
+                 · ${tr('console.energy', 'energy')} ${fmt(strike.energy, 2)}`
+              : tr('console.no_strike_yet', 'none recorded yet')}</div>
+            <div class="scale">${pos == null ? '' : `<i style="left:${pos}%"></i>`}</div>
+            <div class="scale-ends"><span class="sub-d">1 km</span><span class="sub-d">40 km</span></div>
+          </div>
+          <div class="grid2" style="flex:0 0 200px">
+            ${tile(tr('cards.lightning_today', 'Strikes today'),
+              `<span class="big amber">${heute.lightning ?? 0}</span>`,
+              `${tr('console.disturbers', 'disturbers')} ${heute.disturber ?? 0} · ${
+                tr('console.other', 'other')} ${(heute.noise ?? 0) + (heute.unknown ?? 0)}`)}
+            ${tile(tr('cards.lightning_last_event', 'Last signal'),
+              // nowrap and a step down from .med: humanElapsed yields two words
+              // ("3 Min. her", "12 Std. her") and the tile is half-width, so at
+              // 58 px it wrapped mid-phrase.
+              `<span class="med slate" style="font-size:46px;white-space:nowrap">${seen}</span>`,
+              ereignis ? `${tr('console.kind', 'kind')} ${
+                tr('console.kind_' + ereignis.kind, ereignis.kind)}` : '')}
+          </div>
+        </div>
+        <div class="col" style="flex:1">
+          <div class="tile" style="flex:1">
+            <div class="lbl">${tr('console.ka_title', 'Lightning strength (Kachelmann)')}</div>
+            <table class="ref" style="margin-top:16px"><tbody>${zeilen}</tbody></table>
+            <div class="note">${tr('console.ka_note',
+              'Peak current in kA, measured by lightning-location networks. ' +
+              'This sensor cannot measure it — its "energy" is a pure number ' +
+              'with no physical meaning (AS3935 datasheet).')}</div>
+          </div>
+        </div>`;
+    } },
+  { id: 'indoor', title: 'Indoor', age: 'indoor', render: (root, s) => {
+      const i = s.indoor || {};
+      root.innerHTML = `
+        <div class="col" style="flex:1">
+          <div class="tile" style="flex:1">
+            <div class="lbl">${tr('cards.indoor_temp', 'Indoor temp.')}</div>
+            <div class="huge orange value" style="font-size:172px;margin-top:10px">${fmt(i.temperature, 1)}<span class="unit">°C</span></div>
+          </div>
+        </div>
+        <div class="col" style="flex:1">
+          <div class="tile" style="flex:1">
+            <div class="lbl">${tr('cards.indoor_humidity', 'Indoor humidity')}</div>
+            <div class="huge cyan value" style="font-size:172px;margin-top:10px">${fmt(i.humidity, 0)}<span class="unit">%</span></div>
+            <div class="bar"><i style="width:${i.humidity ?? 0}%;background:#0e7490"></i></div>
+          </div>
+          ${tile(tr('cards.pressure', 'Pressure'),
+            `<div class="row"><span class="med violet">${fmt(i.pressure, 1)}<span class="unit-s">hPa</span></span>
+             <span class="sub violet">${TREND_ARROWS[i.pressure_trend] || TREND_ARROWS.unknown}</span></div>`,
+            '', { style: 'flex:0 0 150px' })}
+        </div>`;
+    } },
+  // age: null on purpose. Every other sensor page dims at 90 s and greys out
+  // at 10 minutes, because for them silence means the sensor stopped. Here
+  // silence is the normal state — a lightning page that greyed itself out on
+  // a quiet evening would report a fault that isn't there, every evening.
+  //
+  // The liveness answer is the "last signal" tile instead: it names the last
+  // event of *any* kind, disturbers included. A quiet sky and a disconnected
+  // IRQ wire produce an identical empty log, and this is the only thing on the
+  // console that tells them apart.
+  //
+  // No colour change, no flashing, no auto-switch to this page. This sensor
+  // has never been checked against a real thunderstorm, and an alarm on a wall
+  // display would be exactly the authoritative-looking artefact that must not
+  // be built until it has. See §8 of the integration plan.
   { id: 'sun', title: 'Sun & moon', age: null, render: (root, s) => {
       const sol = s.solar;
       if (!sol) { root.innerHTML = `<div class="tile" style="flex:1"><div class="lbl">${tr('console.no_data', 'no data')}</div></div>`; return; }
@@ -232,87 +313,6 @@ const PAGES = [
               `<span class="big amber">${hhmm(dayMs / 60000)}<span class="unit-s">h</span></span>`,
               `${tr('console.until_sunset', 'until sunset')} ${hhmm(Math.max(0, (ms(sol.sunset) - Date.now()) / 60000))}<br>` +
               `${tr('solar.dawn', 'Dawn')} ${timeOf(sol.dawn, LOCALE)} · ${tr('solar.dusk', 'Dusk')} ${timeOf(sol.dusk, LOCALE)}`)}
-          </div>
-        </div>`;
-    } },
-  { id: 'indoor', title: 'Indoor', age: 'indoor', render: (root, s) => {
-      const i = s.indoor || {};
-      root.innerHTML = `
-        <div class="col" style="flex:1">
-          <div class="tile" style="flex:1">
-            <div class="lbl">${tr('cards.indoor_temp', 'Indoor temp.')}</div>
-            <div class="huge orange value" style="font-size:172px;margin-top:10px">${fmt(i.temperature, 1)}<span class="unit">°C</span></div>
-          </div>
-        </div>
-        <div class="col" style="flex:1">
-          <div class="tile" style="flex:1">
-            <div class="lbl">${tr('cards.indoor_humidity', 'Indoor humidity')}</div>
-            <div class="huge cyan value" style="font-size:172px;margin-top:10px">${fmt(i.humidity, 0)}<span class="unit">%</span></div>
-            <div class="bar"><i style="width:${i.humidity ?? 0}%;background:#0e7490"></i></div>
-          </div>
-          ${tile(tr('cards.pressure', 'Pressure'),
-            `<div class="row"><span class="med violet">${fmt(i.pressure, 1)}<span class="unit-s">hPa</span></span>
-             <span class="sub violet">${TREND_ARROWS[i.pressure_trend] || TREND_ARROWS.unknown}</span></div>`,
-            '', { style: 'flex:0 0 150px' })}
-        </div>`;
-    } },
-  // age: null on purpose. Every other sensor page dims at 90 s and greys out
-  // at 10 minutes, because for them silence means the sensor stopped. Here
-  // silence is the normal state — a lightning page that greyed itself out on
-  // a quiet evening would report a fault that isn't there, every evening.
-  //
-  // The liveness answer is the "last signal" tile instead: it names the last
-  // event of *any* kind, disturbers included. A quiet sky and a disconnected
-  // IRQ wire produce an identical empty log, and this is the only thing on the
-  // console that tells them apart.
-  //
-  // No colour change, no flashing, no auto-switch to this page. This sensor
-  // has never been checked against a real thunderstorm, and an alarm on a wall
-  // display would be exactly the authoritative-looking artefact that must not
-  // be built until it has. See §8 of the integration plan.
-  { id: 'lightning', title: 'Lightning', age: null, render: (root, s) => {
-      const l = s.lightning || {};
-      const strike = l.last_strike, ereignis = l.last_event, heute = l.today || {};
-      const seenMs = parseTimestampMs(ereignis && ereignis.timestamp);
-      const seen = seenMs == null ? '—' : humanElapsed(Date.now() - seenMs, tr);
-      const pos = distanceScalePercent(strike && strike.distance_km);
-      const zeilen = KACHELMANN_KA.map(k =>
-        `<tr><td>${k.range}</td><td>${tr('console.ka_' + k.id, k.en)}</td></tr>`).join('');
-      root.innerHTML = `
-        <div class="col" style="flex:1">
-          <div class="tile" style="flex:1">
-            <div class="lbl">${tr('console.last_strike', 'Last strike')}</div>
-            <div class="huge amber value" style="font-size:172px;margin-top:10px">${
-              strike ? fmt(strike.distance_km, 0) : '—'}<span class="unit">km</span></div>
-            <div class="sub-d value">${strike
-              ? `${timeOf(new Date(parseTimestampMs(strike.timestamp)).toISOString(), LOCALE)}
-                 · ${tr('console.energy', 'energy')} ${fmt(strike.energy, 2)}`
-              : tr('console.no_strike_yet', 'none recorded yet')}</div>
-            <div class="scale">${pos == null ? '' : `<i style="left:${pos}%"></i>`}</div>
-            <div class="scale-ends"><span class="sub-d">1 km</span><span class="sub-d">40 km</span></div>
-          </div>
-          <div class="grid2" style="flex:0 0 200px">
-            ${tile(tr('cards.lightning_today', 'Strikes today'),
-              `<span class="big amber">${heute.lightning ?? 0}</span>`,
-              `${tr('console.disturbers', 'disturbers')} ${heute.disturber ?? 0} · ${
-                tr('console.other', 'other')} ${(heute.noise ?? 0) + (heute.unknown ?? 0)}`)}
-            ${tile(tr('cards.lightning_last_event', 'Last signal'),
-              // nowrap and a step down from .med: humanElapsed yields two words
-              // ("3 Min. her", "12 Std. her") and the tile is half-width, so at
-              // 58 px it wrapped mid-phrase.
-              `<span class="med slate" style="font-size:46px;white-space:nowrap">${seen}</span>`,
-              ereignis ? `${tr('console.kind', 'kind')} ${
-                tr('console.kind_' + ereignis.kind, ereignis.kind)}` : '')}
-          </div>
-        </div>
-        <div class="col" style="flex:1">
-          <div class="tile" style="flex:1">
-            <div class="lbl">${tr('console.ka_title', 'Lightning strength (Kachelmann)')}</div>
-            <table class="ref" style="margin-top:16px"><tbody>${zeilen}</tbody></table>
-            <div class="note">${tr('console.ka_note',
-              'Peak current in kA, measured by lightning-location networks. ' +
-              'This sensor cannot measure it — its "energy" is a pure number ' +
-              'with no physical meaning (AS3935 datasheet).')}</div>
           </div>
         </div>`;
     } },
