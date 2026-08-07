@@ -161,6 +161,14 @@ being throttled.
 
 ## 5. Pages
 
+> **Superseded on 2026-08-07 — this section records the design as of
+> 2026-07-25 and is no longer the running order.** The console now has
+> **eight** pages: a lightning page was added with the AS3935 on 2026-08-06,
+> and the order was changed to `now, wind, rain, lightning, indoor, sun & moon,
+> status, system` on 2026-08-07. The numbers in the paragraph below therefore
+> no longer address the pages they name. The authority is the `PAGES` array in
+> `web/static/js/console.js`; the descriptions here remain valid per page.
+
 Seven pages, cycled in this order. Each fills exactly 1280×720: a 56 px header,
 the body, and a 44 px indicator row. **Nothing scrolls anywhere.** Content that
 does not fit is a layout defect and gets fixed as one.
