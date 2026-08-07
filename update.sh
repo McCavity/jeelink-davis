@@ -10,9 +10,11 @@
 #     (config.toml is never overwritten)
 #   - Reinstalls Python dependencies if pyproject.toml changed
 #   - Restarts the davis-weather service
+#   - Restarts the touch console, if one is running on this machine
 #
-# Static files (web/static/) take effect immediately on browser refresh;
-# the service restart is still performed to pick up any Python changes.
+# Static files (web/static/) take effect on the next browser *load*, which is
+# not the same as immediately: the kiosk browser holds its JavaScript for as
+# long as it runs, and it runs for weeks. See the console restart at the end.
 
 set -euo pipefail
 
@@ -172,6 +174,29 @@ systemctl restart "$SERVICE_FILE"
 
 if $UNIT_CHANGED; then
     echo "Unit ordering now: $(systemctl show "$SERVICE_FILE" -p After --value)"
+fi
+
+# The console is a second service running a browser, and a browser keeps the
+# JavaScript it loaded for as long as the process lives — here, weeks. Without
+# this restart a front-end deploy reaches every visitor except the one display
+# that is actually on the wall, and nothing ever reports the discrepancy.
+#
+# Measured 2026-08-07: the panel was serving the build of 2026-08-06 08:55,
+# missing the lightning page that had gone into production the evening before.
+# Neither the deploy nor the service restart would have corrected it.
+#
+# This works because the origin sends `Cache-Control: no-cache` for static
+# files (web/app.py) — the browser revalidates on load rather than trusting a
+# heuristic freshness lifetime it invented for itself. Removing that header
+# makes this restart silently ineffective again: the browser would start,
+# consult its own disk cache and never ask. That is exactly how the 2026-08-07
+# case survived a restart.
+#
+# Conditional: the console is optional and most installations do not have it.
+CONSOLE_SERVICE=weather-console.service
+if systemctl is-active --quiet "$CONSOLE_SERVICE"; then
+    echo "Restarting $CONSOLE_SERVICE (the kiosk browser holds the old front end) …"
+    systemctl restart "$CONSOLE_SERVICE"
 fi
 
 echo ""

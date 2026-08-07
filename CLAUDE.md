@@ -224,7 +224,38 @@ marker parked at the left end would read as "directly overhead".
 - **Service**: `davis-weather.service` (systemd), runs as user `davis`
 - **Shutdown**: `--timeout-graceful-shutdown 3` + `TimeoutStopSec=10` to avoid SSE connections delaying reboots
 - **Database**: `/opt/jeelink-davis/data/readings.db` (SQLite, WAL mode)
-- **Deploy**: copy changed files to `/opt/jeelink-davis/`, then `sudo systemctl restart davis-weather` for Python changes; static files take effect immediately on browser refresh
+- **Deploy**: `sudo ./update.sh` from the repository checkout on the target host. It syncs, restarts `davis-weather`, and — if present — `weather-console`.
+
+### A deploy does not reach the wall display by itself
+
+Static files take effect on the next browser **load**, and the kiosk browser
+does not load again for weeks. Two independent things have to be true, and
+each one has already failed once:
+
+1. **The browser process must restart.** `update.sh` restarts the console
+   service for exactly this reason. Before 2026-08-07 it did not, and nothing
+   reported the gap.
+2. **The origin must send `Cache-Control: no-cache`** for static files
+   (`web/app.py`). Otherwise the browser invents a freshness lifetime of its
+   own from the file's age and serves its disk copy without asking — a restart
+   then changes nothing at all.
+
+Measured 2026-08-07: the panel was serving the build of **2026-08-06 08:55**.
+The lightning page had gone into production that same evening across eight
+merged pull requests, and never appeared on the display. The origin fix of
+2026-08-06 was correct and did not help, because **a header only governs
+responses fetched after it exists** — the entry already in the cache kept the
+lifetime it was stored with. Clearing the browser cache once
+(`/var/lib/weather-console/.cache/chromium/…/Cache_Data`) was what closed it.
+
+The cheap check after any front-end deploy, on the host:
+
+```
+sudo journalctl -u davis-weather --since "1 min ago" | grep console.js
+```
+
+No line means the browser never asked — which looks exactly like a successful
+deploy from every other angle.
 
 ## Indoor sensor (GY-BME280)
 
