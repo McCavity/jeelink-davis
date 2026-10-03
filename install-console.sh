@@ -86,9 +86,11 @@ if [[ ! "$OUTPUT" =~ ^[A-Za-z0-9-]+$ ]]; then
     exit 1
 fi
 
-echo "Installing labwc, wlr-randr, chromium, seatd, curl and a colour emoji font …"
+echo "Installing labwc, wlr-randr, chromium, seatd, curl, grim and a colour emoji font …"
 apt-get update -qq
-apt-get install -y --no-install-recommends labwc wlr-randr chromium seatd curl fonts-noto-color-emoji
+# grim: Panelbild für Abnahmen, ohne vor dem Gerät zu stehen —
+#   sudo -u davis XDG_RUNTIME_DIR=/run/weather-console WAYLAND_DISPLAY=wayland-0 grim /var/tmp/panel.png
+apt-get install -y --no-install-recommends labwc wlr-randr chromium seatd curl grim fonts-noto-color-emoji
 
 echo "Enabling seatd …"
 systemctl enable --now seatd.service
